@@ -1,0 +1,6 @@
+{
+  "name": "SMD - HR & Attendance Management System",
+  "description": "نظام إدارة الموارد البشرية ومراقبة الحضور والانصراف لشركة السويس لمشتقات الميثانول (SMD) مع ربط أجهزة البصمة ZKTeco وحساب الوقت الإضافي بدقة ومتابعة الإجازات والمأموريات.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

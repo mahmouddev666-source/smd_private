@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  
+  .font-mono, [class*="tabular-nums"] {
+    font-family: 'JetBrains Mono', 'Cairo', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+}
