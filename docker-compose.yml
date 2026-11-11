@@ -1,0 +1,93 @@
+# ---------------------------------------------------------------------------
+# SMD-HR — full stack for one on-premise Windows machine (Docker Desktop/WSL2).
+#
+#   1) cp .env.example .env    then edit SECRET_KEY / POSTGRES_PASSWORD
+#   2) docker compose up -d --build
+#   3) open http://localhost
+#
+# The API container runs `alembic upgrade head` on every start and then serves
+# the FastAPI app. Demo data is seeded automatically only when
+# SEED_DEMO_ON_START=true (codes 9001+, safe to reset with --reset-demo).
+# ---------------------------------------------------------------------------
+name: smd-hr
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: smd-hr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smd_hr}
+      POSTGRES_USER: ${POSTGRES_USER:-smd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      TZ: ${TZ:-Africa/Cairo}
+      PGTZ: ${TZ:-Africa/Cairo}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - smd
+
+  api:
+    build:
+      context: ./apps/api
+    image: smd-hr-api:latest
+    container_name: smd-hr-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-smd}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-smd_hr}
+      TZ: ${TZ:-Africa/Cairo}
+      STORAGE_DIR: /data/uploads
+      BACKUP_DIR: /backups
+      SEED_DEMO_ON_START: ${SEED_DEMO_ON_START:-false}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      LIBREOFFICE_BIN: ${LIBREOFFICE_BIN:-/usr/bin/libreoffice}
+    volumes:
+      - uploads:/data/uploads
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/app/docker-entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - smd
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    image: smd-hr-web:latest
+    container_name: smd-hr-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - smd
+
+volumes:
+  db_data:
+  uploads:
+  backups:
+
+networks:
+  smd:
+    driver: bridge

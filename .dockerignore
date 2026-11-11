@@ -1,0 +1,26 @@
+# Keep the frontend image build context small and reproducible.
+.git
+.gitignore
+node_modules
+dist
+build
+coverage
+test-results
+playwright-report
+blob-report
+playwright.config.ts
+tests
+docs
+apps
+.env
+.env.*
+!.env.example
+*.log
+*.db
+*.sqlite
+uploads
+backups
+bun.lock
+AGENTS.md
+metadata.json
+README.md

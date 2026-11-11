@@ -1,7 +1,7 @@
 # SMD-HR — خطة التنفيذ والوصول للإنتاج
 
 > **آخر تحديث:** 2026-11-11
-> **الحالة:** المرحلة 0 ✅ مكتملة — المرحلة 1 🟡 جارية (أغلب البنود منجزة أماميًا)
+> **الحالة:** المرحلة 0 ✅ — المرحلة 1 ✅ (أماميًا) — المرحلة 2 🟡 (API + DB + Compose جاهزة، بانتظار التحقق على جهاز به Docker)
 > **مالك المشروع:** شركة السويس لمشتقات الميثانول (SMD) — الإدارة العامة للموارد البشرية
 
 ---
@@ -84,8 +84,8 @@
 | المرحلة | الحالة | المدة | المسؤول |
 |---|---|---|---|
 | 0. التأسيس والتحقق | ✅ مكتملة | 1 يوم | DevOps |
-| 1. بيانات تجريبية + إصلاحات عاجلة | 🟡 جارية (أغلب البنود منجزة) | 2 يوم | Frontend |
-| 2. الباك إند + DB + Auth + Docker | ⬜ لم تبدأ | 1.5 يوم | Backend |
+| 1. بيانات تجريبية + إصلاحات عاجلة | ✅ مكتملة (أماميًا) | 2 يوم | Frontend |
+| 2. الباك إند + DB + Auth + Docker | 🟡 جارية (API + Migrations + Compose جاهزة، Docker لم يُختبر محليًا) | 1.5 يوم | Backend |
 | 3. ربط الواجهة بالـ API | ⬜ لم تبدأ | 1.5 يوم | Frontend |
 | 4. محرك المستندات والنماذج | ⬜ لم تبدأ | 2 يوم | Frontend + Backend |
 | 5. ZKTeco | ⬜ لم تبدأ | 1 يوم | Backend + Hardware |
@@ -119,7 +119,7 @@
 
 ---
 
-### المرحلة 1 — بيانات تجريبية + إصلاحات عاجلة 🟡
+### المرحلة 1 — بيانات تجريبية + إصلاحات عاجلة ✅
 
 **الهدف:** بيانات تجريبية واضحة + إزالة الأخطاء التي تمس المال والبيانات.
 
@@ -128,7 +128,7 @@
   - [x] أرصدة إجازات + 30 يوم حضور ينتهي اليوم + أذونات ومأموريات + جهازا ZKTeco وهميان.
   - [x] حسابات تجريبية: `admin`, `hr`, `viewer` بكلمات مرور تجريبية.
   - [x] `isDemo: true` على كل السجلات التجريبية + `StorageService.resetDemoData()` و`resetAllData()`.
-  - [ ] سكربت `seed_demo.py` الفعلي + `--reset-demo` — **مؤجل للمرحلة 2** (لا يوجد باك إند بعد).
+  - [x] سكربت `seed.py` الفعلي + `--reset-demo` — **مكتمل في المرحلة 2** (`apps/api/app/seed.py`).
 - [ ] إزالة الاعتماد على `initialData.ts` في الإنتاج (خلف `DEMO_MODE`) — **جزئي:** `DEMO_MODE` معلَّم في شاشة الدخول، والإزالة الكاملة مع المرحلة 3.
 - [x] إصلاح "حضور اليوم" والإجماليات لتستخدم تاريخ اليوم/الفترة (`localDateISO()` + `monthKey()`).
 - [x] منع تكرار الموظف (كود/PIN/رقم قومي) وتكرار حضور نفس الموظف في نفس اليوم (upsert).
@@ -152,29 +152,42 @@
 
 ---
 
-### المرحلة 2 — الباك إند + PostgreSQL + المصادقة + Docker
+### المرحلة 2 — الباك إند + PostgreSQL + المصادقة + Docker 🟡
 
 **الهدف:** مصدر بيانات مركزي حقيقي على الجهاز.
 
-- [ ] `docker-compose.yml`: `db`, `api`, `web`, `worker`, `connector`.
-- [ ] مخطط قاعدة البيانات:
-  - [ ] `users`, `roles`, `sessions`/`refresh_tokens`, `audit_logs`.
-  - [ ] `departments`, `employees`, `employee_documents`.
-  - [ ] `shifts`, `holidays`, `settings` (نِسَب الإضافي، الفاصل الزمني، الورديات).
-  - [ ] `attendance`, `biometric_punches`, `sync_logs`.
-  - [ ] `leave_balances`, `leaves`, `leave_approvals`.
-  - [ ] `permits`, `missions`.
-  - [ ] `zkteco_devices`.
-  - [ ] `form_templates`, `form_fields`, `form_files`, `form_submissions`.
-- [ ] Alembic + الترحيلات + قيود UNIQUE + فهارس.
-- [ ] مصادقة: bcrypt + JWT (Access/Refresh) + HttpOnly Cookie.
-- [ ] أدوار: `ADMIN`, `HR`, `SUPERVISOR`, `VIEWER` + صلاحيات على مستوى الـ endpoint.
-- [ ] `audit_logs` لكل عملية كتابة (من، ماذا، قبل/بعد، متى).
-- [ ] سكربت ترحيل: localStorage JSON → DB (إن وُجدت بيانات).
-- [ ] معالجة أخطاء موحدة (Problem Details) + تحقق Pydantic.
-- [ ] OpenAPI + مجموعة اختبارات `pytest`.
+- [x] `docker-compose.yml`: `db` + `api` + `web` (nginx) — `worker`/`connector` مؤجلان للمرحلة 5.
+- [x] مخطط قاعدة البيانات (المرحلة الأولى):
+  - [x] `users`, `audit_logs`.
+  - [x] `employees`.
+  - [x] `attendance`, `biometric_punches`.
+  - [x] `leave_balances`, `leaves`.
+  - [x] `permits`, `missions`.
+  - [x] `zkteco_devices`.
+  - [ ] `departments`, `employee_documents` — المرحلة 4.
+  - [ ] `shifts`, `holidays`, `settings` — المرحلة 6.
+  - [ ] `form_templates`, `form_fields`, `form_files`, `form_submissions` — المرحلة 4.
+- [x] Alembic + ترحيل أولي `552fc48f8e7e_initial_schema.py` + قيود UNIQUE + فهارس + `alembic upgrade head` مُختبر.
+- [x] مصادقة: argon2 (`pwdlib`) + JWT Access + `get_current_user` + `require_role`. (Refresh/HttpOnly Cookie مؤجلة — الواجهة تستخدم Bearer حاليًا.)
+- [x] أدوار: `ADMIN`, `HR`, `SUPERVISOR`, `VIEWER` + `EDITOR_ROLES` على كل كتابة.
+- [x] `audit_logs` لكل عملية كتابة (من، ماذا، قبل/بعد، متى).
+- [x] معالجة أخطاء موحدة `{detail, code}` + تحقق Pydantic + `errors[]` لأخطاء الحقول.
+- [x] OpenAPI + **24/24 اختبار `pytest`** (صحة، مصادقة، موظفون، حضور، إجازات، أذونات/مأموريات).
+- [x] `seed.py` تجريبي: 3 مستخدمين + 18 موظفًا `9001`–`9018` + أرصدة + 30 يوم حضور + جهازان، مع `--reset-demo` و`--create-tables`.
+- [x] حاويات: `apps/api/Dockerfile` (مع LibreOffice)، `apps/api/docker-entrypoint.sh` (انتظار DB → `alembic upgrade head` → uvicorn)، `infra/web/Dockerfile` + `infra/nginx/default.conf` (SPA + proxy `/api`) + `.dockerignore`.
+- [x] تشغيل يدوي مُتحقق منه: `uvicorn` على `127.0.0.1:8100` → `/api/health` + تسجيل دخول `admin` + `/api/employees` = 18.
+- [ ] تشغيل `docker compose up` فعليًا — **متعذر على جهاز التطوير الحالي** (لا Docker Desktop/WSL2 مثبتين، ومثبّت Python عبر winget فشل بـ 1603). ملفات Compose جاهزة وتحتاج جهازًا به Docker للتحقق.
+- [ ] سكربت ترحيل localStorage → DB — سيُنفَّذ مع المرحلة 3 (بعد وجود عميل API).
 
-**معيار القبول:** `docker compose up` يعمل من الصفر، والبيانات تظهر من عدة أجهزة على الشبكة.
+**معيار القبول:** `docker compose up` يعمل من الصفر، والبيانات تظهر من عدة أجهزة على الشبكة. ⏳ (بانتظار التحقق على جهاز به Docker)
+
+**طريقة التشغيل بعد التحقق:**
+```bash
+cp .env.example .env      # عدّل SECRET_KEY و POSTGRES_PASSWORD
+docker compose up -d --build
+docker compose exec api python -m app.seed --profile demo
+# الواجهة: http://localhost   |   Docs: http://localhost/api/docs
+```
 
 ---
 

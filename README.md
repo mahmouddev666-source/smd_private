@@ -24,13 +24,11 @@
 
 ## الوضع الحالي
 
-> ⚠️ المشروع في مرحلة إعادة بناء للوصول للإنتاج.
+> 🟡 المشروع في مرحلة إعادة بناء للوصول للإنتاج.
 
-الإصدار الحالي نموذج أولي (Prototype): الواجهة مكتملة، لكن البيانات تُحفظ في `localStorage`، والمصادقة وتكامل البصمة والترخيص غير حقيقية. يجري نقل النظام إلى:
-
-- **FastAPI** + **PostgreSQL** كطبقة خلفية.
-- **Docker Compose** للتشغيل على جهاز واحد داخل الشركة.
-- **React + TypeScript + Vite** للواجهة (مع إعادة استخدام الموجود).
+- **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (24/24).
+- **Docker جاهز**: `docker-compose.yml` يشغّل `db` + `api` + `web` (nginx). تعذّر التحقق منه على جهاز التطوير الحالي لعدم توفر Docker Desktop/WSL2.
+- **الواجهة** ما زالت تقرأ البيانات من `localStorage`؛ الربط بالـ API هو المرحلة التالية (3).
 
 راجع `docs/PLAN.md` أو خطة التنفيذ لمزيد من التفاصيل.
 
@@ -43,8 +41,9 @@
 | الواجهة | React 19, TypeScript, Vite, Tailwind CSS 4 |
 | الأيقونات | lucide-react |
 | الملفات | SheetJS (xlsx), mammoth, pdf.js |
-| الباك إند (مستهدف) | FastAPI, SQLAlchemy, Alembic, Pydantic |
-| قاعدة البيانات (مستهدف) | PostgreSQL 16 |
+| الباك إند | FastAPI, SQLAlchemy 2, Alembic, Pydantic, psycopg 3 |
+| قاعدة البيانات | PostgreSQL 16 |
+| المصادقة | JWT + argon2 (`pwdlib`) |
 | تكامل البصمة | Python + pyzk |
 | التشغيل | Docker Compose على Windows (WSL2) |
 | الاختبارات | Vitest, Pytest, Playwright |
@@ -84,18 +83,20 @@ npm run lint     # فحص TypeScript (tsc --noEmit)
 
 ---
 
-## التشغيل الكامل (بعد اكتمال المرحلة 2)
+## التشغيل الكامل (Docker)
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # عدّل SECRET_KEY و POSTGRES_PASSWORD
 docker compose up -d --build
-docker compose exec api alembic upgrade head
 docker compose exec api python -m app.seed --profile demo
 ```
 
 - الواجهة: <http://localhost>
 - API Docs: <http://localhost/api/docs>
 - الصحة: <http://localhost/api/health>
+
+> عند كل إقلاع تنتظر حاوية `api` قاعدة البيانات ثم تنفّذ `alembic upgrade head` تلقائيًا.
+> يمكن تعبئة البيانات التجريبية تلقائيًا بضبط `SEED_DEMO_ON_START=true` في `.env`.
 
 ### بيانات الدخول التجريبية
 
@@ -127,18 +128,20 @@ docker compose exec api python -m app.seed --reset-demo
 ```
 .
 ├── apps/
-│   ├── web/                  # واجهة React
-│   └── api/                  # FastAPI
-├── services/
-│   └── connector/            # خدمة ZKTeco (pyzk)
+│   └── api/                  # FastAPI: app/, alembic/, tests/, Dockerfile
 ├── infra/
-│   └── docker-compose.yml
-├── docs/                     # أدلة النشر والاستخدام
+│   ├── nginx/default.conf    # SPA + proxy /api
+│   └── web/Dockerfile        # بناء الواجهة + nginx
+├── docker-compose.yml        # db + api + web
+├── docs/                     # الخطة وأدلة النشر
 ├── public/                   # الأصول العامة (الشعار)
 ├── src/                      # الواجهة الحالية (سيتم نقلها إلى apps/web)
+├── tests/                    # Vitest + Playwright
 ├── AGENTS.md                 # قواعد العمل للمطورين والوكلاء
 └── README.md
 ```
+
+> ملاحظة: الواجهة ما زالت في `src/` بالجذر. نقلها إلى `apps/web/` مؤجل حتى يكتمل ربط الـ API (المرحلة 3) لتجنّب إعادة كتابة المسارات مرتين.
 
 ---
 
@@ -149,9 +152,12 @@ docker compose exec api python -m app.seed --reset-demo
 | `APP_ENV` | بيئة التشغيل | `production` |
 | `APP_URL` | عنوان الواجهة | `http://smd-hr.local` |
 | `DATABASE_URL` | اتصال PostgreSQL | `postgresql+psycopg://smd:pass@db:5432/smd_hr` |
+| `POSTGRES_PASSWORD` | كلمة مرور قاعدة البيانات (Compose) | — |
 | `SECRET_KEY` | مفتاح الجلسات (32+ حرفًا) | — |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | صلاحية الجلسة | `480` |
 | `TZ` | المنطقة الزمنية | `Africa/Cairo` |
+| `WEB_PORT` | منفذ الواجهة على الجهاز | `80` |
+| `SEED_DEMO_ON_START` | تعبئة بيانات تجريبية عند الإقلاع | `false` |
 | `STORAGE_DIR` | مسار تخزين الملفات | `/data/uploads` |
 | `MAX_UPLOAD_MB` | حد حجم الملف | `20` |
 | `ZK_SYNC_INTERVAL_MINUTES` | فترة مزامنة البصمة | `10` |
@@ -181,9 +187,13 @@ docker compose exec -T db psql -U smd smd_hr < backup.sql
 
 ```bash
 npm run lint                 # فحص الأنواع
-npm test                     # اختبارات الوحدة (Vitest)
-npx playwright test          # اختبارات E2E
+npm test                     # اختبارات الوحدة (Vitest) — 27/27
+npx playwright test          # اختبارات E2E — 9/9
 npx playwright show-report   # تقرير HTML
+
+# الباك إند
+cd apps/api
+pytest                       # 24/24 على SQLite in-memory
 ```
 
 ---

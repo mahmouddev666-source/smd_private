@@ -1,0 +1,11 @@
+# Keep container entrypoints and configs on LF even when checked out on Windows.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+*/Dockerfile text eol=lf
+*.conf text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Normalise everything else (Git decides based on content).
+* text=auto
