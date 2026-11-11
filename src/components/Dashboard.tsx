@@ -25,6 +25,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { exportLeaveBalancesToExcel, exportAttendanceToExcel } from '../utils/fileExport';
+import { localDateISO, monthKey } from '../utils/dateUtils';
 
 interface DashboardProps {
   employees: Employee[];
@@ -48,13 +49,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Compute Key Metrics
   const totalEmployees = employees.length;
   const activeEmployees = employees.filter(e => e.isActive).length;
-  const todayAttendance = attendance.filter(a => a.date === '2026-11-01' || a.date === '2026-11-02');
+  const today = localDateISO();
+  const todayAttendance = attendance.filter(a => a.date === today);
   const presentCount = todayAttendance.filter(a => a.status === 'حاضر' || a.status === 'إضافي').length;
-  
-  const totalOvertimeHours = attendance.reduce((sum, a) => sum + (a.overtimeHoursTotal || 0), 0);
-  const totalDayOT = attendance.reduce((sum, a) => sum + (a.dayOvertimeHours || 0), 0);
-  const totalNightOT = attendance.reduce((sum, a) => sum + (a.nightOvertimeHours || 0), 0);
-  const totalOTPay = attendance.reduce((sum, a) => sum + (a.totalOvertimePay || 0), 0);
+
+  const monthPrefix = monthKey(today);
+  const monthAttendance = attendance.filter(a => a.date.startsWith(monthPrefix));
+
+  const totalOvertimeHours = monthAttendance.reduce((sum, a) => sum + (a.overtimeHoursTotal || 0), 0);
+  const totalDayOT = monthAttendance.reduce((sum, a) => sum + (a.dayOvertimeHours || 0), 0);
+  const totalNightOT = monthAttendance.reduce((sum, a) => sum + (a.nightOvertimeHours || 0), 0);
+  const totalOTPay = monthAttendance.reduce((sum, a) => sum + (a.totalOvertimePay || 0), 0);
 
   const connectedDevicesCount = devices.filter(d => d.status === 'connected').length;
 

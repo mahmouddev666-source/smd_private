@@ -5,6 +5,7 @@
 
 import * as XLSX from 'xlsx';
 import { Employee, AttendanceRecord, LeaveBalance, LeaveRecord } from '../types';
+import { localDateISO } from './dateUtils';
 
 export function exportToExcel(data: any[], filename: string, sheetName: string = 'Sheet1') {
   const worksheet = XLSX.utils.json_to_sheet(data);
@@ -37,7 +38,7 @@ export function exportAttendanceToExcel(records: AttendanceRecord[], employees: 
     };
   });
 
-  exportToExcel(rows, `تقرير_حضور_وانصراف_SMD_${new Date().toISOString().split('T')[0]}`, 'سجل الحضور');
+  exportToExcel(rows, `تقرير_حضور_وانصراف_SMD_${localDateISO()}`, 'سجل الحضور');
 }
 
 export function exportEmployeesToExcel(employees: Employee[]) {
@@ -61,7 +62,7 @@ export function exportEmployeesToExcel(employees: Employee[]) {
     'الحالة': e.isActive ? 'على رأس العمل' : 'متوقف'
   }));
 
-  exportToExcel(rows, `دليل_العاملين_شركة_السويس_لمشتقات_الميثانول_${new Date().toISOString().split('T')[0]}`, 'العاملين');
+  exportToExcel(rows, `دليل_العاملين_شركة_السويس_لمشتقات_الميثانول_${localDateISO()}`, 'العاملين');
 }
 
 export function exportLeaveBalancesToExcel(balances: LeaveBalance[], employees: Employee[]) {
@@ -114,7 +115,7 @@ export function exportPermitsToExcel(permits: any[], employees: Employee[]) {
       'الحالة': p.status
     };
   });
-  exportToExcel(rows, `سجل_الاذونات_والتصاريح_SMD_${new Date().toISOString().split('T')[0]}`, 'الأذونات');
+  exportToExcel(rows, `سجل_الاذونات_والتصاريح_SMD_${localDateISO()}`, 'الأذونات');
 }
 
 export function exportMissionsToExcel(missions: any[], employees: Employee[]) {
@@ -139,7 +140,7 @@ export function exportMissionsToExcel(missions: any[], employees: Employee[]) {
       'الحالة': m.status
     };
   });
-  exportToExcel(rows, `سجل_الماموريات_وبدلات_السفر_SMD_${new Date().toISOString().split('T')[0]}`, 'المأموريات');
+  exportToExcel(rows, `سجل_الماموريات_وبدلات_السفر_SMD_${localDateISO()}`, 'المأموريات');
 }
 
 export function exportAllSheetsToExcel(data: {
@@ -246,7 +247,7 @@ export function exportAllSheetsToExcel(data: {
   });
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(mRows), 'المأموريات الرسمية');
 
-  XLSX.writeFile(workbook, `قاعدة_بيانات_شاملة_SMD_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(workbook, `قاعدة_بيانات_شاملة_SMD_${localDateISO()}.xlsx`);
 }
 
 /**

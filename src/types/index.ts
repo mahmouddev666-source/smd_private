@@ -3,7 +3,7 @@
  * Core Types Definition
  */
 
-export type UserRole = 'ADMIN' | 'VIEWER';
+export type UserRole = 'ADMIN' | 'HR' | 'VIEWER';
 
 export interface UserSession {
   id: string;
@@ -71,6 +71,8 @@ export interface Employee {
   photoUrl?: string;          // صورة الموظف
   defaultShift: ShiftType;    // الوردية الافتراضية
   isActive: boolean;
+  /** True for seeded demo data (codes 9001+); deleted by `reset-demo`. */
+  isDemo?: boolean;
   documents?: {
     id: string;
     title: string;
@@ -108,6 +110,7 @@ export interface LeaveBalance {
   casualUsed: number;
   sickUsed: number;
   otherUsed: number;
+  isDemo?: boolean;
 }
 
 export interface LeaveRecord {
@@ -123,6 +126,7 @@ export interface LeaveRecord {
   approvedBy?: string;
   approvalDate?: string;
   notes?: string;
+  isDemo?: boolean;
 }
 
 export type PermitType = 'إذن شخصي' | 'إذن عمل';
@@ -138,6 +142,7 @@ export interface PermitRecord {
   reason: string;
   status: 'معتمد' | 'قيد الانتظار' | 'مرفوض';
   approvedBy?: string;
+  isDemo?: boolean;
 }
 
 export type MissionType = 'مأمورية داخلية' | 'مأمورية ببدل' | 'مأمورية بدون بدل';
@@ -156,6 +161,7 @@ export interface MissionRecord {
   transportationType: 'سيارة الشركة' | 'قطار / حافلة' | 'طيران' | 'خاصة ببدل انتقال';
   status: 'معتمد' | 'قيد المراجعة' | 'مرفوض';
   approvedBy?: string;
+  isDemo?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -181,6 +187,7 @@ export interface AttendanceRecord {
   deviceId?: string;
   notes?: string;
   status: 'حاضر' | 'متأخر' | 'انصراف مبكر' | 'إضافي' | 'غياب' | 'إجازة' | 'مأمورية';
+  isDemo?: boolean;
 }
 
 export interface ZKTecoDevice {
@@ -198,6 +205,7 @@ export interface ZKTecoDevice {
   totalUsers?: number;
   totalLogs?: number;
   totalFingers?: number;
+  isDemo?: boolean;
 }
 
 export interface BiometricLogEntry {
@@ -207,6 +215,7 @@ export interface BiometricLogEntry {
   timestamp: string;
   verifyMode: 'بصمة إصبع' | 'بصمة وجه' | 'كارت RFID' | 'كلمة سر';
   punchType: 'دخول' | 'خروج' | 'خروج مؤقت (إذن)' | 'عودة من إذن';
+  isDemo?: boolean;
 }
 
 export interface LicenseConfig {

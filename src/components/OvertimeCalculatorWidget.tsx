@@ -23,6 +23,17 @@ export const OvertimeCalculatorWidget: React.FC = () => {
   const [checkOut, setCheckOut] = useState<string>('20:00');
   const [hourlyRate, setHourlyRate] = useState<number>(85.0);
   const [showCode, setShowCode] = useState<boolean>(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  const copyPythonCode = async () => {
+    try {
+      await navigator.clipboard.writeText(getPythonOvertimeCode());
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
+    }
+    setTimeout(() => setCopyStatus('idle'), 3000);
+  };
 
   // Compute live breakdown
   const result = calculateOvertime(shiftType, checkIn, checkOut, hourlyRate);
@@ -278,15 +289,20 @@ export const OvertimeCalculatorWidget: React.FC = () => {
               <Code className="w-4 h-4 text-emerald-400" />
               <span className="text-xs font-bold text-white font-mono">overtime_calc.py (Python Backend Engine)</span>
             </div>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(getPythonOvertimeCode());
-                alert('تم نسخ كود Python إلى الحافظة بنجاح!');
-              }}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-mono transition-colors cursor-pointer"
-            >
-              نسخ الكود
-            </button>
+            <div className="flex items-center gap-2">
+              {copyStatus === 'copied' && (
+                <span className="text-[11px] font-bold text-emerald-400">تم النسخ إلى الحافظة ✓</span>
+              )}
+              {copyStatus === 'error' && (
+                <span className="text-[11px] font-bold text-rose-400">تعذّر النسخ، حدد الكود يدويًا</span>
+              )}
+              <button
+                onClick={copyPythonCode}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-mono transition-colors cursor-pointer"
+              >
+                نسخ الكود
+              </button>
+            </div>
           </div>
           <pre className="text-xs font-mono overflow-x-auto text-emerald-300 p-3 bg-slate-950 rounded-lg max-h-96" dir="ltr">
             {getPythonOvertimeCode()}

@@ -20,6 +20,8 @@ import {
   Table
 } from 'lucide-react';
 
+import { addDaysISO, localDateISO } from '../utils/dateUtils';
+
 export type ScanDomain = 'employees' | 'attendance' | 'leaves' | 'permits' | 'missions' | 'forms';
 
 interface PhotoImportModalProps {
@@ -149,14 +151,14 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
   };
 
   const generateExtractedRows = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateISO();
     const rndSuffix = Math.floor(100 + Math.random() * 900);
 
     if (domain === 'employees') {
       // Extracted employee records from photographed sheet / ID
       setExtractedRows([
         {
-          employeeId: `10${rndSuffix.toString().slice(0, 2)}`,
+          employeeId: `90${rndSuffix.toString().slice(0, 2)}`,
           name: 'م. مروان أشرف الشريف',
           currentTitle: 'مهندس سلامة عمليات كيميائية',
           position: 'مهندس عمليات',
@@ -175,7 +177,7 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
           isActive: true
         },
         {
-          employeeId: `10${(Number(rndSuffix.toString().slice(0, 2)) + 1)}`,
+          employeeId: `90${(Number(rndSuffix.toString().slice(0, 2)) + 1)}`,
           name: 'أ. حسام الدين نبيل القاضي',
           currentTitle: 'أخصائي شؤون مالية ومراجعة تكاليف',
           position: 'محاسب تكاليف',
@@ -198,7 +200,7 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
       // Extracted attendance records from photographed punch sheet
       setExtractedRows([
         {
-          employeeId: '1001',
+          employeeId: '9001',
           date: today,
           shiftType: 'NORMAL_DAY',
           checkIn: '08:00',
@@ -216,7 +218,7 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
           notes: 'مستخرج آلياً عبر تصوير كشف البصمة الورقي'
         },
         {
-          employeeId: '1003',
+          employeeId: '9003',
           date: today,
           shiftType: 'DAY_SHIFT',
           checkIn: '07:50',
@@ -238,13 +240,13 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
       // Extracted leave applications from photographed leave forms
       setExtractedRows([
         {
-          employeeId: '1004',
+          employeeId: '9004',
           leaveType: 'اعتيادي',
           startDate: today,
-          endDate: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
+          endDate: addDaysISO(today, 2),
           daysCount: 3,
           reason: 'إجازة اعتيادية سنوية طبقاً للنموذج المصور',
-          replacementEmployeeId: '1003',
+          replacementEmployeeId: '9003',
           status: 'معتمد',
           approvedBy: 'مستخدم النظام (User)',
           approvalDate: today,
@@ -255,7 +257,7 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
       // Extracted permits from photographed exit slip
       setExtractedRows([
         {
-          employeeId: '1002',
+          employeeId: '9002',
           permitType: 'إذن شخصي',
           date: today,
           startTime: '10:00',
@@ -266,7 +268,7 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
           approvedBy: 'مستخدم النظام (User)'
         },
         {
-          employeeId: '1004',
+          employeeId: '9004',
           permitType: 'إذن عمل',
           date: today,
           startTime: '13:00',
@@ -281,12 +283,12 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
       // Extracted missions from photographed assignment order
       setExtractedRows([
         {
-          employeeId: '1003',
+          employeeId: '9003',
           missionType: 'مأمورية ببدل',
           destination: 'مصانع البتروكيماويات بالإسكندرية',
           purpose: 'متابعة صيانة التوربينات البخارية وضواغط الغاز',
           startDate: today,
-          endDate: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
+          endDate: addDaysISO(today, 2),
           daysCount: 3,
           allowancePerDay: 450,
           totalAllowance: 1350,
@@ -344,6 +346,9 @@ export const PhotoImportModal: React.FC<PhotoImportModalProps> = ({
               <p className="text-xs text-blue-200">
                 {description}
               </p>
+              <span className="mt-1.5 inline-block px-2 py-0.5 bg-amber-400/20 border border-amber-300/40 text-amber-200 rounded text-[10px] font-bold">
+                وضع تجريبي (DEMO) — الاستخراج محاكاة وليس OCR فعليًا
+              </span>
             </div>
           </div>
 

@@ -6,6 +6,7 @@
 
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import { localDateISO } from './dateUtils';
 
 export interface FormCustomField {
   id: string;
@@ -105,7 +106,7 @@ function extractTextFromPdfArrayBuffer(buffer: ArrayBuffer): string {
 export async function parseFormFile(file: File): Promise<CustomFormTemplate> {
   const fileName = file.name;
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
-  const now = new Date().toISOString().split('T')[0];
+  const now = localDateISO();
   const uniqueId = `SMD-DOC-${Date.now()}`;
   const defaultBaseTitle = fileName.replace(/\.[^/.]+$/, '').replace(/[_|-]/g, ' ');
 

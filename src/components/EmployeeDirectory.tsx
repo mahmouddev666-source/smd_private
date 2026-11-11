@@ -27,10 +27,14 @@ import {
   FileSpreadsheet,
   Camera,
   Upload,
-  CheckCircle2
+  CheckCircle2,
+  UserCheck,
+  UserX,
+  AlertTriangle
 } from 'lucide-react';
 import { exportEmployeesToExcel, parseExcelFile } from '../utils/fileExport';
 import { PhotoImportModal } from './PhotoImportModal';
+import { localDateISO } from '../utils/dateUtils';
 
 interface EmployeeDirectoryProps {
   employees: Employee[];
@@ -40,6 +44,28 @@ interface EmployeeDirectoryProps {
   onDeleteEmployee: (employeeId: string) => void;
   onSelectEmployee: (employeeId: string) => void;
 }
+
+type NewEmployeeForm = Omit<Employee, 'serial' | 'isDemo'>;
+
+const createEmptyEmployeeForm = (): NewEmployeeForm => ({
+  employeeId: '',
+  name: '',
+  mobile: '',
+  email: '',
+  currentTitle: '',
+  position: '',
+  assignedTitle: '',
+  department: SMD_DEPARTMENTS[3] as string, // default العمليات
+  contractType: 'دائم' as ContractType,
+  grade: 'أولى' as JobGrade,
+  workLocation: 'مصنع السويس لمشتقات الميثانول' as WorkLocation,
+  nationalId: '',
+  insuranceId: '',
+  hourlyRate: 90,
+  hireDate: localDateISO(),
+  defaultShift: 'NORMAL_DAY' as ShiftType,
+  isActive: true,
+});
 
 export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   employees,
@@ -52,27 +78,38 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDept, setSelectedDept] = useState<string>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Employee | null>(null);
 
-  // New Employee Form State
-  const [formData, setFormData] = useState({
-    employeeId: '',
-    name: '',
-    mobile: '',
-    email: '',
-    currentTitle: '',
-    position: '',
-    assignedTitle: '',
-    department: SMD_DEPARTMENTS[3] as string, // default العمليات
-    contractType: 'دائم' as ContractType,
-    grade: 'أولى' as JobGrade,
-    workLocation: 'مصنع السويس لمشتقات الميثانول' as WorkLocation,
-    nationalId: '',
-    insuranceId: '',
-    hourlyRate: 90,
-    hireDate: new Date().toISOString().split('T')[0],
-    defaultShift: 'NORMAL_DAY' as ShiftType,
-    isActive: true
-  });
+  const canEdit = user.role === 'ADMIN' || user.role === 'HR';
+
+  const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // New / Edit Employee Form State
+  const [formData, setFormData] = useState<NewEmployeeForm>(createEmptyEmployeeForm());
+
+  const openAddModal = () => {
+    setModalMode('add');
+    setEditingEmployeeId(null);
+    setFormError(null);
+    setFormData(createEmptyEmployeeForm());
+    setShowAddModal(true);
+  };
+
+  const openEditModal = (employee: Employee) => {
+    setModalMode('edit');
+    setEditingEmployeeId(employee.employeeId);
+    setFormError(null);
+    const { serial: _serial, isDemo: _isDemo, ...editable } = employee;
+    setFormData(editable);
+    setShowAddModal(true);
+  };
+
+  const closeModal = () => {
+    setShowAddModal(false);
+    setFormError(null);
+  };
 
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = 
@@ -87,42 +124,100 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.employeeId || !formData.nationalId) {
-      alert('يرجى تعبئة الحقول الأساسية: كود الموظف، الاسم، والرقم القومي.');
+    setFormError(null);
+    const employeeId = formData.employeeId.trim();
+    const nationalId = formData.nationalId.trim();
+
+    if (!formData.name.trim() || !employeeId || !nationalId) {
+      setFormError('يرجى تعبئة الحقول الأساسية: كود الموظف، الاسم، والرقم القومي.');
       return;
     }
-    onAddEmployee(formData);
-    setShowAddModal(false);
-    // Reset form
-    setFormData({
-      employeeId: '',
-      name: '',
-      mobile: '',
-      email: '',
-      currentTitle: '',
-      position: '',
-      assignedTitle: '',
-      department: SMD_DEPARTMENTS[3] as string,
-      contractType: 'دائم',
-      grade: 'أولى',
-      workLocation: 'مصنع السويس لمشتقات الميثانول',
-      nationalId: '',
-      insuranceId: '',
-      hourlyRate: 90,
-      hireDate: new Date().toISOString().split('T')[0],
-      defaultShift: 'NORMAL_DAY',
-      isActive: true
-    });
+    if (!/^\d{14}$/.test(nationalId)) {
+      setFormError('الرقم القومي يجب أن يكون 14 رقمًا.');
+      return;
+    }
+
+    const duplicateCode = employees.some(
+      (employee) => employee.employeeId === employeeId && employee.employeeId !== editingEmployeeId,
+    );
+    if (duplicateCode) {
+      setFormError(`كود الموظف "${employeeId}" مستخدم بالفعل. اختر كودًا آخر (PIN فريد لجهاز البصمة).`);
+      return;
+    }
+    const duplicateNationalId = employees.some(
+      (employee) => employee.nationalId === nationalId && employee.employeeId !== editingEmployeeId,
+    );
+    if (duplicateNationalId) {
+      setFormError('الرقم القومي مسجل بالفعل لموظف آخر.');
+      return;
+    }
+
+    const payload: NewEmployeeForm = {
+      ...formData,
+      employeeId,
+      name: formData.name.trim(),
+      nationalId,
+    };
+
+    try {
+      if (modalMode === 'edit' && editingEmployeeId) {
+        const original = employees.find((employee) => employee.employeeId === editingEmployeeId);
+        if (!original) {
+          setFormError('لم يتم العثور على الموظف المطلوب تعديله.');
+          return;
+        }
+        onUpdateEmployee({ ...payload, serial: original.serial, isDemo: original.isDemo });
+      } else {
+        onAddEmployee(payload);
+      }
+      closeModal();
+      setFormData(createEmptyEmployeeForm());
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'تعذر حفظ بيانات الموظف.');
+    }
+  };
+
+  const handleToggleActive = (employee: Employee) => {
+    onUpdateEmployee({ ...employee, isActive: !employee.isActive });
+  };
+
+  const handleDelete = (employee: Employee) => {
+    setPendingDelete(employee);
+  };
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    onDeleteEmployee(pendingDelete.employeeId);
+    setPendingDelete(null);
   };
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
   const excelInputRef = React.useRef<HTMLInputElement | null>(null);
 
+  const importEmployeeSafely = (
+    payload: Omit<Employee, 'serial'>,
+    seenIds: Set<string>,
+  ): boolean => {
+    const code = payload.employeeId.trim();
+    if (!code || seenIds.has(code) || employees.some((employee) => employee.employeeId === code)) {
+      return false;
+    }
+    seenIds.add(code);
+    try {
+      onAddEmployee(payload);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const handlePhotoImport = (rows: any[]) => {
+    const seenIds = new Set<string>();
+    let added = 0;
     rows.forEach(r => {
-      onAddEmployee({
-        employeeId: r.employeeId || `10${Math.floor(10 + Math.random() * 89)}`,
+      const ok = importEmployeeSafely({
+        employeeId: String(r.employeeId || `90${Math.floor(10 + Math.random() * 89)}`),
         name: r.name || 'موظف مستورد',
         mobile: r.mobile || '01000000000',
         email: r.email || '',
@@ -133,16 +228,21 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         contractType: (r.contractType as ContractType) || 'دائم',
         grade: (r.grade as JobGrade) || 'ثانية',
         workLocation: (r.workLocation as WorkLocation) || 'مصنع السويس لمشتقات الميثانول',
-        nationalId: r.nationalId || '29000000000000',
+        nationalId: r.nationalId || `2${Date.now()}`.slice(0, 14),
         insuranceId: r.insuranceId || '00000000',
         hourlyRate: Number(r.hourlyRate) || 85,
-        hireDate: r.hireDate || new Date().toISOString().split('T')[0],
+        hireDate: r.hireDate || localDateISO(),
         defaultShift: (r.defaultShift as ShiftType) || 'NORMAL_DAY',
-        isActive: true
-      });
+        isActive: true,
+        isDemo: true,
+      }, seenIds);
+      if (ok) added += 1;
     });
-    setImportSuccessMsg(`تم استيراد ${rows.length} موظف بنجاح من المستند المصور!`);
-    setTimeout(() => setImportSuccessMsg(null), 3500);
+    setImportSuccessMsg(
+      `تم استيراد ${added} موظف بنجاح من المستند المصور` +
+      (added < rows.length ? ` — تم تجاهل ${rows.length - added} صف مكرر أو غير صالح.` : '.'),
+    );
+    setTimeout(() => setImportSuccessMsg(null), 4000);
   };
 
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,40 +251,46 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     try {
       const rows = await parseExcelFile(file);
       if (rows.length === 0) {
-        alert('الملف فارغ أو لا يحتوي على بيانات صالحة.');
+        setImportSuccessMsg('الملف فارغ أو لا يحتوي على بيانات صالحة.');
         return;
       }
+      const seenIds = new Set<string>();
       let addedCount = 0;
       rows.forEach((r: any) => {
         const name = r['الاسم بالكامل'] || r['الاسم'] || r['Name'] || r['name'];
-        const empId = String(r['كود الموظف'] || r['الكود'] || r['ID'] || r['id'] || `10${Math.floor(10 + Math.random() * 89)}`);
-        if (name) {
-          onAddEmployee({
-            employeeId: empId,
-            name: String(name),
-            mobile: String(r['رقم المحمول'] || r['المحمول'] || r['Mobile'] || '01000000000'),
-            email: String(r['البريد الإلكتروني'] || r['Email'] || ''),
-            currentTitle: String(r['المسمى الوظيفي'] || r['المسمى'] || r['Title'] || 'موظف'),
-            position: String(r['الوظيفة'] || r['Position'] || 'موظف'),
-            assignedTitle: String(r['المسمى المكلف به'] || ''),
-            department: String(r['الإدارة / القطاع'] || r['القطاع'] || r['Department'] || SMD_DEPARTMENTS[3]),
-            contractType: (r['نوع العقد'] as ContractType) || 'دائم',
-            grade: (r['الدرجة الوظيفية'] as JobGrade) || 'أولى',
-            workLocation: (r['موقع العمل'] as WorkLocation) || 'مصنع السويس لمشتقات الميثانول',
-            nationalId: String(r['الرقم القومي'] || '29000000000000'),
-            insuranceId: String(r['الرقم التأميني'] || '00000000'),
-            hourlyRate: Number(r['أجر الساعة (ج.م)'] || r['أجر الساعة'] || 85),
-            hireDate: String(r['تاريخ التعيين'] || new Date().toISOString().split('T')[0]),
-            defaultShift: 'NORMAL_DAY',
-            isActive: true
-          });
-          addedCount++;
-        }
+        const empId = String(r['كود الموظف'] || r['الكود'] || r['ID'] || r['id'] || `90${Math.floor(10 + Math.random() * 89)}`);
+        if (!name) return;
+        const ok = importEmployeeSafely({
+          employeeId: empId,
+          name: String(name),
+          mobile: String(r['رقم المحمول'] || r['المحمول'] || r['Mobile'] || '01000000000'),
+          email: String(r['البريد الإلكتروني'] || r['Email'] || ''),
+          currentTitle: String(r['المسمى الوظيفي'] || r['المسمى'] || r['Title'] || 'موظف'),
+          position: String(r['الوظيفة'] || r['Position'] || 'موظف'),
+          assignedTitle: String(r['المسمى المكلف به'] || ''),
+          department: String(r['الإدارة / القطاع'] || r['القطاع'] || r['Department'] || SMD_DEPARTMENTS[3]),
+          contractType: (r['نوع العقد'] as ContractType) || 'دائم',
+          grade: (r['الدرجة الوظيفية'] as JobGrade) || 'أولى',
+          workLocation: (r['موقع العمل'] as WorkLocation) || 'مصنع السويس لمشتقات الميثانول',
+          nationalId: String(r['الرقم القومي'] || `2${Date.now()}`.slice(0, 14)),
+          insuranceId: String(r['الرقم التأميني'] || '00000000'),
+          hourlyRate: Number(r['أجر الساعة (ج.م)'] || r['أجر الساعة'] || 85),
+          hireDate: String(r['تاريخ التعيين'] || localDateISO()),
+          defaultShift: 'NORMAL_DAY',
+          isActive: true,
+          isDemo: true,
+        }, seenIds);
+        if (ok) addedCount += 1;
       });
-      setImportSuccessMsg(`تم استيراد ${addedCount} موظف بنجاح من ملف Excel!`);
-      setTimeout(() => setImportSuccessMsg(null), 3500);
+      setImportSuccessMsg(
+        `تم استيراد ${addedCount} موظف بنجاح من ملف Excel` +
+        (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف مكرر أو غير صالح.` : '.'),
+      );
+      setTimeout(() => setImportSuccessMsg(null), 4000);
     } catch (err: any) {
-      alert('حدث خطأ أثناء قراءة ملف Excel: ' + (err.message || ''));
+      setImportSuccessMsg('حدث خطأ أثناء قراءة ملف Excel: ' + (err.message || ''));
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -214,6 +320,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           
           {/* CAMERA / PHOTO IMPORT BUTTON */}
+          {canEdit && (
           <button
             onClick={() => setShowPhotoModal(true)}
             className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -222,8 +329,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             <Camera className="w-4 h-4 text-cyan-200" />
             <span>استيراد بالتصوير (كاميرا)</span>
           </button>
+          )}
 
           {/* EXCEL IMPORT BUTTON */}
+          {canEdit && (
           <button
             onClick={() => excelInputRef.current?.click()}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -232,6 +341,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             <Upload className="w-4 h-4 text-slate-600" />
             <span>استيراد Excel</span>
           </button>
+          )}
 
           {/* EXCEL EXPORT BUTTON */}
           <button
@@ -244,13 +354,15 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           </button>
 
           {/* ADD EMPLOYEE BUTTON (AVAILABLE FOR USER) */}
+          {canEdit && (
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={openAddModal}
             className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
             <span>إضافة موظف جديد</span>
           </button>
+          )}
         </div>
       </div>
 
@@ -258,6 +370,31 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-xl flex items-center gap-2 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span className="font-semibold">{importSuccessMsg}</span>
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div role="alertdialog" aria-modal="true" className="p-3.5 bg-amber-50 border border-amber-300 text-amber-900 text-xs rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span className="font-semibold">
+              هل أنت متأكد من حذف الموظف &laquo;{pendingDelete.name}&raquo; ({pendingDelete.employeeId})؟ سيتم حذف سجلاته المرتبطة.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={confirmDelete}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold cursor-pointer"
+            >
+              تأكيد الحذف
+            </button>
+            <button
+              onClick={() => setPendingDelete(null)}
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg font-bold cursor-pointer"
+            >
+              إلغاء
+            </button>
+          </div>
         </div>
       )}
 
@@ -365,14 +502,45 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                     <td className="py-3 px-3 font-mono text-slate-700">
                       {emp.insuranceId}
                     </td>
-                    <td className="py-3 px-3 text-center">
-                      <button
-                        onClick={() => onSelectEmployee(emp.employeeId)}
-                        className="p-1.5 text-blue-700 hover:bg-blue-50 rounded transition-colors cursor-pointer"
-                        title="عرض الملف الكامل للموظف"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
+                    <td className="py-3 px-3">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => onSelectEmployee(emp.employeeId)}
+                          className="p-1.5 text-blue-700 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                          title="عرض الملف الكامل للموظف"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {canEdit && (
+                          <>
+                            <button
+                              onClick={() => openEditModal(emp)}
+                              className="p-1.5 text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                              title="تعديل بيانات الموظف"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleToggleActive(emp)}
+                              className={`p-1.5 rounded transition-colors cursor-pointer ${
+                                emp.isActive
+                                  ? 'text-amber-700 hover:bg-amber-50'
+                                  : 'text-emerald-700 hover:bg-emerald-50'
+                              }`}
+                              title={emp.isActive ? 'إيقاف الموظف (إبقاء السجل)' : 'إعادة تفعيل الموظف'}
+                            >
+                              {emp.isActive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(emp)}
+                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                              title="حذف الموظف"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -385,11 +553,13 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       {/* Add Employee Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div role="dialog" aria-modal="true" className="bg-white rounded-2xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  إضافة موظف جديد لقاعدة بيانات SMD
+                  {modalMode === 'edit'
+                    ? `تعديل بيانات الموظف (${editingEmployeeId})`
+                    : 'إضافة موظف جديد لقاعدة بيانات SMD'}
                 </h3>
                 <p className="text-xs text-slate-500">
                   تسكين الموظف على القطاع والوردية وربطه بجهاز البصمة ZKTeco
@@ -610,7 +780,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                   type="submit"
                   className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
                 >
-                  حفظ وتسجيل الموظف
+                  {modalMode === 'edit' ? 'حفظ التعديلات' : 'حفظ وتسجيل الموظف'}
                 </button>
               </div>
             </form>

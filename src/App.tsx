@@ -38,7 +38,13 @@ import { ArchitectureAndDbView } from './components/ArchitectureAndDbView';
 import { LicensingManager } from './components/LicensingManager';
 import { BackupAndRestoreModal } from './components/BackupAndRestoreModal';
 import { calculateOvertime } from './utils/overtimeCalculator';
+import { localDateISO, localTimeString } from './utils/dateUtils';
+import { newId } from './utils/id';
 import { Database } from 'lucide-react';
+
+// Align the local dataset with the current demo schema before any component
+// reads from storage (e.g. legacy `1001+` datasets are reseeded once).
+StorageService.ensureDataVersion();
 
 export default function App() {
   // Session
@@ -94,7 +100,7 @@ export default function App() {
       expiryDate: newExpiryDate,
       licenseKey: newKey,
       isTimeLocked: false,
-      lastVerifiedAt: new Date().toISOString().split('T')[0]
+      lastVerifiedAt: localDateISO()
     };
     setLicense(updated);
     StorageService.saveLicense(updated);
@@ -116,10 +122,15 @@ export default function App() {
 
   const handleSwitchRole = (newRole: UserRole) => {
     if (!user) return;
+    const roleNames: Record<UserRole, string> = {
+      ADMIN: 'أ. محمد عبد الرحمن (مدير النظام)',
+      HR: 'أ. منى إبراهيم عطية (موارد بشرية)',
+      VIEWER: 'أحمد السعيد (قراءة فقط)'
+    };
     const updated: UserSession = {
       ...user,
       role: newRole,
-      name: newRole === 'ADMIN' ? 'أ. محمد عبد الرحمن (مستخدم user)' : 'أحمد السعيد (مستخدم قراءة فقط)'
+      name: roleNames[newRole]
     };
     setUser(updated);
     StorageService.setCurrentUser(updated);
@@ -173,46 +184,53 @@ export default function App() {
   };
 
   const handleSyncDeviceLogs = (deviceId: string) => {
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    const dateStr = now.toISOString().split('T')[0];
+    const dateStr = localDateISO();
+    const timeStr = localTimeString().slice(0, 5);
 
-    // Pick 2 random employees to simulate newly pulled punches
-    const sampleEmp1 = employees[0] || { employeeId: '1001', hourlyRate: 150 };
-    const sampleEmp2 = employees[2] || { employeeId: '1003', hourlyRate: 95 };
+    const activeEmployees = employees.filter((employee) => employee.isActive);
+    if (activeEmployees.length === 0) return;
 
+    const sampleEmp1 = activeEmployees[0];
+    const sampleEmp2 = activeEmployees[1] || activeEmployees[0];
+
+    // DEMO_MODE: simulated device pull. The real ZKTeco connector (phase 5)
+    // will run on the server via pyzk; the browser never talks to the device.
     const newLogs: BiometricLogEntry[] = [
       {
-        id: `PUNCH-${Date.now()}-1`,
+        id: newId('PUNCH'),
         deviceId,
         enrollNumber: sampleEmp1.employeeId,
         timestamp: `${dateStr} 07:55:00`,
         verifyMode: 'بصمة إصبع',
-        punchType: 'دخول'
+        punchType: 'دخول',
+        isDemo: true
       },
       {
-        id: `PUNCH-${Date.now()}-2`,
+        id: newId('PUNCH'),
         deviceId,
         enrollNumber: sampleEmp1.employeeId,
         timestamp: `${dateStr} 20:00:00`,
         verifyMode: 'بصمة إصبع',
-        punchType: 'خروج'
+        punchType: 'خروج',
+        isDemo: true
       },
       {
-        id: `PUNCH-${Date.now()}-3`,
+        id: newId('PUNCH'),
         deviceId,
         enrollNumber: sampleEmp2.employeeId,
         timestamp: `${dateStr} 07:45:00`,
         verifyMode: 'بصمة وجه',
-        punchType: 'دخول'
+        punchType: 'دخول',
+        isDemo: true
       },
       {
-        id: `PUNCH-${Date.now()}-4`,
+        id: newId('PUNCH'),
         deviceId,
         enrollNumber: sampleEmp2.employeeId,
         timestamp: `${dateStr} 21:30:00`,
         verifyMode: 'بصمة وجه',
-        punchType: 'خروج'
+        punchType: 'خروج',
+        isDemo: true
       }
     ];
 
@@ -221,7 +239,7 @@ export default function App() {
     StorageService.saveBiometricLogs(updatedLogs);
     setBiometricLogs(updatedLogs);
 
-    // Also calculate overtime and update attendance table automatically
+    // Upsert today's attendance (one row per employee per day).
     const ot1 = calculateOvertime('NORMAL_DAY', '07:55', '20:00', sampleEmp1.hourlyRate);
     StorageService.addAttendanceRecord({
       employeeId: sampleEmp1.employeeId,
@@ -230,7 +248,7 @@ export default function App() {
       checkIn: '07:55',
       checkOut: '20:00',
       workingHours: ot1.actualWorkedHours,
-      standardHours: 8,
+      standardHours: ot1.standardHours,
       overtimeHoursTotal: ot1.totalOvertimeHours,
       dayOvertimeHours: ot1.dayOvertimeHours,
       nightOvertimeHours: ot1.nightOvertimeHours,
@@ -239,8 +257,9 @@ export default function App() {
       totalOvertimePay: ot1.totalOvertimePay,
       source: 'ZKTeco-Biometric',
       deviceId,
-      status: 'إضافي',
-      notes: 'تمت المزامنة آلياً عبر الشبكة المحلية ZKTeco TCP/IP'
+      status: ot1.suggestedStatus,
+      notes: 'مزامنة تجريبية (DEMO_MODE) — لا يوجد اتصال فعلي بالجهاز',
+      isDemo: sampleEmp1.isDemo
     });
 
     setAttendance(StorageService.getAttendance());

@@ -25,6 +25,7 @@ import {
   Upload
 } from 'lucide-react';
 import { exportLeaveBalancesToExcel, parseExcelFile } from '../utils/fileExport';
+import { localDateISO } from '../utils/dateUtils';
 import { PhotoImportModal } from './PhotoImportModal';
 
 interface LeaveAndBalancesProps {
@@ -66,8 +67,8 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
   // New Leave Form State
   const [empId, setEmpId] = useState(employees[0]?.employeeId || '');
   const [leaveType, setLeaveType] = useState<LeaveType>('اعتيادي');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(localDateISO());
+  const [endDate, setEndDate] = useState(localDateISO());
   const [daysCount, setDaysCount] = useState(1);
   const [reason, setReason] = useState('');
   const [replacementEmpId, setReplacementEmpId] = useState('');
@@ -96,49 +97,62 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
       replacementEmployeeId: replacementEmpId,
       status: 'معتمد',
       approvedBy: user.name,
-      approvalDate: new Date().toISOString().split('T')[0]
+      approvalDate: localDateISO()
     });
     setShowAddModal(false);
   };
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
+  const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
   const excelInputRef = React.useRef<HTMLInputElement | null>(null);
 
+  const knownEmployeeIds = new Set(employees.map(e => e.employeeId));
+
   const handlePhotoImport = (rows: any[]) => {
+    setImportErrorMsg(null);
+    let addedCount = 0;
     rows.forEach(r => {
+      const employeeId = String(r.employeeId || '');
+      if (!knownEmployeeIds.has(employeeId)) return; // skip unknown employees
       onAddLeave({
-        employeeId: r.employeeId || '1004',
+        employeeId,
         leaveType: (r.leaveType as LeaveType) || 'اعتيادي',
-        startDate: r.startDate || new Date().toISOString().split('T')[0],
-        endDate: r.endDate || new Date().toISOString().split('T')[0],
+        startDate: r.startDate || localDateISO(),
+        endDate: r.endDate || localDateISO(),
         daysCount: Number(r.daysCount) || 1,
         reason: r.reason || 'مستورد ضوئياً من صورة نموذج طلب الإجازة',
         replacementEmployeeId: r.replacementEmployeeId || '',
         status: 'معتمد',
         approvedBy: user.name,
-        approvalDate: new Date().toISOString().split('T')[0],
+        approvalDate: localDateISO(),
         notes: 'تم المسح الضوئي والاعتماد آلياً'
       });
+      addedCount += 1;
     });
-    setImportSuccessMsg(`تم استيراد ${rows.length} طلب إجازة بنجاح وخصمها من الأرصدة!`);
-    setTimeout(() => setImportSuccessMsg(null), 3500);
+    setImportSuccessMsg(
+      `تم استيراد ${addedCount} طلب إجازة بنجاح وخصمها من الأرصدة` +
+      (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل.` : '!'),
+    );
+    setTimeout(() => setImportSuccessMsg(null), 4500);
   };
 
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImportErrorMsg(null);
     try {
       const rows = await parseExcelFile(file);
       if (rows.length === 0) {
-        alert('الملف فارغ أو لا يحتوي على بيانات صالحة.');
+        setImportErrorMsg('الملف فارغ أو لا يحتوي على بيانات صالحة.');
         return;
       }
       let addedCount = 0;
       rows.forEach((r: any) => {
-        const empId = String(r['كود الموظف'] || r['كود'] || r['Employee ID'] || r['employeeId'] || '1001');
+        const empId = String(r['كود الموظف'] || r['كود'] || r['Employee ID'] || r['employeeId'] || '');
+        if (!knownEmployeeIds.has(empId)) return; // skip unknown employees
         const lType = (r['نوع الإجازة'] || r['Leave Type'] || 'اعتيادي') as LeaveType;
-        const sDate = String(r['تاريخ البدء'] || r['Start Date'] || new Date().toISOString().split('T')[0]);
+        const sDate = String(r['تاريخ البدء'] || r['Start Date'] || localDateISO());
         const eDate = String(r['تاريخ الانتهاء'] || r['End Date'] || sDate);
         const days = Number(r['عدد الأيام'] || r['Days'] || 1);
         const reasonText = String(r['السبب'] || r['Reason'] || 'مستورد من ملف Excel');
@@ -152,14 +166,19 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
           reason: reasonText,
           status: 'معتمد',
           approvedBy: user.name,
-          approvalDate: new Date().toISOString().split('T')[0]
+          approvalDate: localDateISO()
         });
         addedCount++;
       });
-      setImportSuccessMsg(`تم استيراد ${addedCount} طلب إجازة بنجاح من ملف Excel!`);
-      setTimeout(() => setImportSuccessMsg(null), 3500);
+      setImportSuccessMsg(
+        `تم استيراد ${addedCount} طلب إجازة بنجاح من ملف Excel` +
+        (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل أو بيانات غير صالحة.` : '!'),
+      );
+      setTimeout(() => setImportSuccessMsg(null), 4500);
     } catch (err: any) {
-      alert('حدث خطأ أثناء قراءة ملف الإجازات: ' + (err.message || ''));
+      setImportErrorMsg('حدث خطأ أثناء قراءة ملف الإجازات: ' + (err.message || ''));
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -232,6 +251,13 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
         <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-xl flex items-center gap-2 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span className="font-semibold">{importSuccessMsg}</span>
+        </div>
+      )}
+
+      {importErrorMsg && (
+        <div className="p-3.5 bg-rose-50 border border-rose-300 text-rose-800 text-xs rounded-xl flex items-center gap-2 shadow-xs">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span className="font-semibold">{importErrorMsg}</span>
         </div>
       )}
 

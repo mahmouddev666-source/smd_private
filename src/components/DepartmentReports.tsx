@@ -22,6 +22,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { exportToExcel } from '../utils/fileExport';
+import { localDateISO } from '../utils/dateUtils';
 
 interface DepartmentReportsProps {
   employees: Employee[];
@@ -87,7 +88,7 @@ export const DepartmentReports: React.FC<DepartmentReportsProps> = ({
       'عدد المأموريات': s.missionCount,
       'بدلات المأموريات (ج.م)': s.missionAllowances
     }));
-    exportToExcel(rows, `التقرير_القطاعي_SMD_${new Date().toISOString().split('T')[0]}`, 'التقرير القطاعي');
+    exportToExcel(rows, `التقرير_القطاعي_SMD_${localDateISO()}`, 'التقرير القطاعي');
   };
 
   // Find max values for visual bars

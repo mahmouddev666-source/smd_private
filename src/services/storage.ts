@@ -1,6 +1,19 @@
 /**
  * SMD - Suez Methanol Derivatives Co.
- * Local Storage & Persistence Service
+ * Local persistence service.
+ *
+ * PHASE-1 NOTE
+ * ------------
+ * This module is a *temporary* browser persistence layer until the FastAPI +
+ * PostgreSQL backend (phase 2) replaces it. It already enforces the same
+ * business invariants the database will enforce:
+ *   - `employees.employee_id` is unique
+ *   - `employees.national_id` is unique
+ *   - `attendance (employee_id, date)` is unique (upsert, never duplicate)
+ *   - every generated identifier is a real UUID-based id, not `length + 1`
+ *
+ * Demo data is tagged with `isDemo = true` and can be removed independently
+ * via `resetDemoData()` without touching real records.
  */
 
 import {
@@ -14,7 +27,6 @@ import {
   BiometricLogEntry,
   LicenseConfig,
   UserSession,
-  ShiftType
 } from '../types';
 import {
   INITIAL_EMPLOYEES,
@@ -24,9 +36,10 @@ import {
   INITIAL_MISSIONS,
   generateInitialAttendance,
   INITIAL_DEVICES,
-  INITIAL_LICENSE
+  INITIAL_LICENSE,
 } from '../data/initialData';
-import { calculateOvertime } from '../utils/overtimeCalculator';
+import { attendanceKey, newId } from '../utils/id';
+import { localDateISO, localTimestamp } from '../utils/dateUtils';
 
 const KEYS = {
   EMPLOYEES: 'smd_hr_employees',
@@ -39,17 +52,36 @@ const KEYS = {
   BIOMETRIC_LOGS: 'smd_hr_biometric_logs',
   LICENSE: 'smd_hr_license',
   USER_SESSION: 'smd_hr_user_session',
-  CUSTOM_FORMS: 'smd_hr_custom_forms'
-};
+  CUSTOM_FORMS: 'smd_hr_custom_forms',
+  DATA_VERSION: 'smd_hr_data_version',
+} as const;
+
+/**
+ * Bumping this value invalidates older local datasets (e.g. the old `1001+`
+ * demo codes). `ensureDataVersion()` then reseeds demo data once.
+ */
+const CURRENT_DATA_VERSION = '2';
+const DEMO_EMPLOYEE_THRESHOLD = 9000;
+
+function cloneFallback<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value;
+  try {
+    return structuredClone(value);
+  } catch {
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+}
 
 function safeGet<T>(key: string, fallback: T): T {
   try {
     const val = localStorage.getItem(key);
-    if (!val) return fallback;
+    // Always return a copy of the fallback: returning `INITIAL_*` by reference
+    // lets callers mutate the module-level seed array.
+    if (!val) return cloneFallback(fallback);
     return JSON.parse(val) as T;
   } catch (err) {
     console.error(`Error loading key ${key}:`, err);
-    return fallback;
+    return cloneFallback(fallback);
   }
 }
 
@@ -61,63 +93,143 @@ function safeSet<T>(key: string, data: T): void {
   }
 }
 
+function isDemoEmployee(employee: Employee): boolean {
+  return employee.isDemo === true || Number(employee.employeeId) >= DEMO_EMPLOYEE_THRESHOLD;
+}
+
+function createDefaultBalance(employee: Employee): LeaveBalance {
+  const currentYear = Number(localDateISO().slice(0, 4));
+  return {
+    employeeId: employee.employeeId,
+    year: currentYear,
+    annualOpening: employee.grade.includes('مدير') ? 30 : 21,
+    casualOpening: 7,
+    sickOpening: 90,
+    sickCycleStartYear: currentYear,
+    annualUsed: 0,
+    casualUsed: 0,
+    sickUsed: 0,
+    otherUsed: 0,
+    isDemo: employee.isDemo,
+  };
+}
+
 export const StorageService = {
+  // ---------------------------------------------------------------------------
   // Session
+  // ---------------------------------------------------------------------------
   getCurrentUser(): UserSession | null {
     // No auto-login: an explicit session must exist in storage.
     return safeGet<UserSession | null>(KEYS.USER_SESSION, null);
   },
   setCurrentUser(user: UserSession | null): void {
-    safeSet(KEYS.USER_SESSION, user);
+    if (user) {
+      safeSet(KEYS.USER_SESSION, user);
+    } else {
+      localStorage.removeItem(KEYS.USER_SESSION);
+    }
   },
 
+  /**
+   * Migrates/aligns the local dataset with the current demo schema.
+   * Safe to call on every boot: it only writes when a migration is required.
+   */
+  ensureDataVersion(): void {
+    const stored = localStorage.getItem(KEYS.DATA_VERSION);
+    if (stored === CURRENT_DATA_VERSION) return;
+
+    const employees = safeGet<Employee[] | null>(KEYS.EMPLOYEES, null);
+    const hasLegacyDemoCodes =
+      employees !== null &&
+      employees.some((employee) => Number(employee.employeeId) < DEMO_EMPLOYEE_THRESHOLD);
+
+    // First run, or an old `1001+` demo dataset: drop stale business data so it
+    // is reseeded from `initialData`. Session and license are preserved.
+    if (employees === null || hasLegacyDemoCodes) {
+      Object.values(KEYS).forEach((key) => {
+        if (key === KEYS.LICENSE || key === KEYS.USER_SESSION) return;
+        localStorage.removeItem(key);
+      });
+    }
+
+    safeSet(KEYS.DATA_VERSION, CURRENT_DATA_VERSION);
+  },
+
+  // ---------------------------------------------------------------------------
   // Employees
+  // ---------------------------------------------------------------------------
   getEmployees(): Employee[] {
     return safeGet<Employee[]>(KEYS.EMPLOYEES, INITIAL_EMPLOYEES);
   },
   saveEmployees(employees: Employee[]): void {
     safeSet(KEYS.EMPLOYEES, employees);
   },
+  findEmployee(employeeId: string): Employee | undefined {
+    return this.getEmployees().find((employee) => employee.employeeId === employeeId);
+  },
   addEmployee(emp: Omit<Employee, 'serial'>): Employee {
     const list = this.getEmployees();
-    const maxSerial = list.reduce((m, e) => Math.max(m, e.serial), 0);
-    const newEmp: Employee = {
+    const employeeId = emp.employeeId.trim();
+    const nationalId = emp.nationalId.trim();
+
+    if (!employeeId) {
+      throw new Error('كود الموظف مطلوب.');
+    }
+    if (list.some((employee) => employee.employeeId === employeeId)) {
+      throw new Error(`كود الموظف "${employeeId}" مستخدم بالفعل.`);
+    }
+    if (nationalId && list.some((employee) => employee.nationalId === nationalId)) {
+      throw new Error('الرقم القومي مسجل بالفعل لموظف آخر.');
+    }
+
+    const maxSerial = list.reduce((max, employee) => Math.max(max, employee.serial), 0);
+    const newEmployee: Employee = {
       ...emp,
-      serial: maxSerial + 1
+      employeeId,
+      nationalId,
+      serial: maxSerial + 1,
     };
-    list.push(newEmp);
+    list.push(newEmployee);
     this.saveEmployees(list);
 
-    // Also initialize leave balance
     const balances = this.getLeaveBalances();
-    if (!balances.find(b => b.employeeId === newEmp.employeeId)) {
-      balances.push({
-        employeeId: newEmp.employeeId,
-        year: new Date().getFullYear(),
-        annualOpening: newEmp.grade.includes('مدير') ? 30 : 21,
-        casualOpening: 7,
-        sickOpening: 90,
-        sickCycleStartYear: new Date().getFullYear(),
-        annualUsed: 0,
-        casualUsed: 0,
-        sickUsed: 0,
-        otherUsed: 0
-      });
+    if (!balances.some((balance) => balance.employeeId === newEmployee.employeeId)) {
+      balances.push(createDefaultBalance(newEmployee));
       this.saveLeaveBalances(balances);
     }
 
-    return newEmp;
+    return newEmployee;
   },
   updateEmployee(updated: Employee): void {
-    const list = this.getEmployees().map(e => (e.employeeId === updated.employeeId ? updated : e));
+    const list = this.getEmployees();
+    const index = list.findIndex((employee) => employee.employeeId === updated.employeeId);
+    if (index === -1) {
+      throw new Error('لم يتم العثور على الموظف المطلوب تحديثه.');
+    }
+    const duplicateNationalId = list.some(
+      (employee, employeeIndex) =>
+        employeeIndex !== index && employee.nationalId === updated.nationalId,
+    );
+    if (duplicateNationalId) {
+      throw new Error('الرقم القومي مسجل بالفعل لموظف آخر.');
+    }
+    list[index] = updated;
     this.saveEmployees(list);
   },
   deleteEmployee(employeeId: string): void {
-    const list = this.getEmployees().filter(e => e.employeeId !== employeeId);
-    this.saveEmployees(list);
+    this.saveEmployees(this.getEmployees().filter((employee) => employee.employeeId !== employeeId));
+    // Cascade: remove the employee's balance and daily attendance.
+    this.saveLeaveBalances(
+      this.getLeaveBalances().filter((balance) => balance.employeeId !== employeeId),
+    );
+    this.saveAttendance(
+      this.getAttendance().filter((record) => record.employeeId !== employeeId),
+    );
   },
 
-  // Leave Balances
+  // ---------------------------------------------------------------------------
+  // Leave balances
+  // ---------------------------------------------------------------------------
   getLeaveBalances(): LeaveBalance[] {
     return safeGet<LeaveBalance[]>(KEYS.LEAVE_BALANCES, INITIAL_LEAVE_BALANCES);
   },
@@ -125,7 +237,9 @@ export const StorageService = {
     safeSet(KEYS.LEAVE_BALANCES, balances);
   },
 
+  // ---------------------------------------------------------------------------
   // Leaves
+  // ---------------------------------------------------------------------------
   getLeaves(): LeaveRecord[] {
     return safeGet<LeaveRecord[]>(KEYS.LEAVES, INITIAL_LEAVES);
   },
@@ -134,12 +248,11 @@ export const StorageService = {
   },
   addLeave(leave: Omit<LeaveRecord, 'id'>): LeaveRecord {
     const list = this.getLeaves();
-    const newId = `LV-${new Date().getFullYear()}-${String(list.length + 1).padStart(3, '0')}`;
-    const newRecord: LeaveRecord = { ...leave, id: newId };
+    const newRecord: LeaveRecord = { ...leave, id: newId('LV') };
     list.unshift(newRecord);
     this.saveLeaves(list);
 
-    // Deduct from balance if approved
+    // Deduct from the balance once, only when the leave is approved on creation.
     if (newRecord.status === 'معتمد') {
       this.updateBalanceForLeave(newRecord);
     }
@@ -147,22 +260,24 @@ export const StorageService = {
   },
   updateBalanceForLeave(leave: LeaveRecord): void {
     const balances = this.getLeaveBalances();
-    const bal = balances.find(b => b.employeeId === leave.employeeId);
-    if (!bal) return;
+    const balance = balances.find((item) => item.employeeId === leave.employeeId);
+    if (!balance) return;
 
     if (leave.leaveType === 'اعتيادي') {
-      bal.annualUsed += leave.daysCount;
+      balance.annualUsed += leave.daysCount;
     } else if (leave.leaveType === 'عارضة') {
-      bal.casualUsed += leave.daysCount;
+      balance.casualUsed += leave.daysCount;
     } else if (leave.leaveType === 'مرضي') {
-      bal.sickUsed += leave.daysCount;
+      balance.sickUsed += leave.daysCount;
     } else {
-      bal.otherUsed += leave.daysCount;
+      balance.otherUsed += leave.daysCount;
     }
     this.saveLeaveBalances(balances);
   },
 
+  // ---------------------------------------------------------------------------
   // Permits
+  // ---------------------------------------------------------------------------
   getPermits(): PermitRecord[] {
     return safeGet<PermitRecord[]>(KEYS.PERMITS, INITIAL_PERMITS);
   },
@@ -171,14 +286,15 @@ export const StorageService = {
   },
   addPermit(permit: Omit<PermitRecord, 'id'>): PermitRecord {
     const list = this.getPermits();
-    const newId = `PR-${new Date().getFullYear()}-${String(list.length + 101).padStart(3, '0')}`;
-    const newRec: PermitRecord = { ...permit, id: newId };
-    list.unshift(newRec);
+    const newRecord: PermitRecord = { ...permit, id: newId('PR') };
+    list.unshift(newRecord);
     this.savePermits(list);
-    return newRec;
+    return newRecord;
   },
 
+  // ---------------------------------------------------------------------------
   // Missions
+  // ---------------------------------------------------------------------------
   getMissions(): MissionRecord[] {
     return safeGet<MissionRecord[]>(KEYS.MISSIONS, INITIAL_MISSIONS);
   },
@@ -187,30 +303,53 @@ export const StorageService = {
   },
   addMission(mission: Omit<MissionRecord, 'id'>): MissionRecord {
     const list = this.getMissions();
-    const newId = `MS-${new Date().getFullYear()}-${String(list.length + 51).padStart(3, '0')}`;
-    const newRec: MissionRecord = { ...mission, id: newId };
-    list.unshift(newRec);
+    const newRecord: MissionRecord = { ...mission, id: newId('MS') };
+    list.unshift(newRecord);
     this.saveMissions(list);
-    return newRec;
+    return newRecord;
   },
 
+  // ---------------------------------------------------------------------------
   // Attendance
+  // ---------------------------------------------------------------------------
   getAttendance(): AttendanceRecord[] {
     return safeGet<AttendanceRecord[]>(KEYS.ATTENDANCE, generateInitialAttendance());
   },
   saveAttendance(records: AttendanceRecord[]): void {
     safeSet(KEYS.ATTENDANCE, records);
   },
+  /**
+   * Upserts a daily attendance record. One row per employee per calendar day:
+   * syncing a device or re-submitting the form updates the existing row instead
+   * of appending a duplicate that inflates payroll.
+   */
   addAttendanceRecord(record: Omit<AttendanceRecord, 'id'>): AttendanceRecord {
     const list = this.getAttendance();
-    const newId = `ATT-${new Date().getFullYear()}-${String(list.length + 1).padStart(3, '0')}`;
-    const newRec: AttendanceRecord = { ...record, id: newId };
-    list.unshift(newRec);
+    const key = attendanceKey(record.employeeId, record.date);
+    const existingIndex = list.findIndex(
+      (item) => attendanceKey(item.employeeId, item.date) === key,
+    );
+
+    if (existingIndex >= 0) {
+      const merged: AttendanceRecord = {
+        ...list[existingIndex],
+        ...record,
+        id: list[existingIndex].id,
+      };
+      list[existingIndex] = merged;
+      this.saveAttendance(list);
+      return merged;
+    }
+
+    const newRecord: AttendanceRecord = { ...record, id: newId('ATT') };
+    list.unshift(newRecord);
     this.saveAttendance(list);
-    return newRec;
+    return newRecord;
   },
 
-  // ZKTeco Devices
+  // ---------------------------------------------------------------------------
+  // ZKTeco devices (simulated in phase 1, real connector in phase 5)
+  // ---------------------------------------------------------------------------
   getDevices(): ZKTecoDevice[] {
     return safeGet<ZKTecoDevice[]>(KEYS.DEVICES, INITIAL_DEVICES);
   },
@@ -218,118 +357,66 @@ export const StorageService = {
     safeSet(KEYS.DEVICES, devices);
   },
   updateDevice(updated: ZKTecoDevice): void {
-    const list = this.getDevices().map(d => (d.id === updated.id ? updated : d));
-    this.saveDevices(list);
+    this.saveDevices(
+      this.getDevices().map((device) => (device.id === updated.id ? updated : device)),
+    );
   },
 
-  // Biometric Logs
+  // ---------------------------------------------------------------------------
+  // Biometric logs (clearly marked as simulated demo data)
+  // ---------------------------------------------------------------------------
   getBiometricLogs(): BiometricLogEntry[] {
+    const today = localDateISO();
     return safeGet<BiometricLogEntry[]>(KEYS.BIOMETRIC_LOGS, [
       {
-        id: "LOG-01",
-        deviceId: "ZK-01",
-        enrollNumber: "1001",
-        timestamp: "2026-11-01 07:55:12",
-        verifyMode: "بصمة إصبع",
-        punchType: "دخول"
+        id: 'LOG-DEMO-01',
+        deviceId: 'ZK-01',
+        enrollNumber: '9001',
+        timestamp: `${today} 07:55:12`,
+        verifyMode: 'بصمة إصبع',
+        punchType: 'دخول',
+        isDemo: true,
       },
       {
-        id: "LOG-02",
-        deviceId: "ZK-01",
-        enrollNumber: "1001",
-        timestamp: "2026-11-01 20:00:44",
-        verifyMode: "بصمة إصبع",
-        punchType: "خروج"
+        id: 'LOG-DEMO-02',
+        deviceId: 'ZK-01',
+        enrollNumber: '9001',
+        timestamp: `${today} 20:00:44`,
+        verifyMode: 'بصمة إصبع',
+        punchType: 'خروج',
+        isDemo: true,
       },
       {
-        id: "LOG-03",
-        deviceId: "ZK-01",
-        enrollNumber: "1002",
-        timestamp: "2026-11-01 08:02:10",
-        verifyMode: "بصمة وجه",
-        punchType: "دخول"
+        id: 'LOG-DEMO-03',
+        deviceId: 'ZK-02',
+        enrollNumber: '9002',
+        timestamp: `${today} 08:02:10`,
+        verifyMode: 'بصمة وجه',
+        punchType: 'دخول',
+        isDemo: true,
       },
       {
-        id: "LOG-04",
-        deviceId: "ZK-01",
-        enrollNumber: "1002",
-        timestamp: "2026-11-01 16:05:30",
-        verifyMode: "بصمة وجه",
-        punchType: "خروج"
-      }
+        id: 'LOG-DEMO-04',
+        deviceId: 'ZK-02',
+        enrollNumber: '9002',
+        timestamp: `${today} 16:05:30`,
+        verifyMode: 'بصمة وجه',
+        punchType: 'خروج',
+        isDemo: true,
+      },
     ]);
   },
   saveBiometricLogs(logs: BiometricLogEntry[]): void {
     safeSet(KEYS.BIOMETRIC_LOGS, logs);
   },
 
-  // Custom Company Form Templates (Imported via camera or created)
+  // ---------------------------------------------------------------------------
+  // Company form templates (phase 4 will move these to server storage)
+  // ---------------------------------------------------------------------------
   getCustomForms(): any[] {
-    return safeGet<any[]>(KEYS.CUSTOM_FORMS, [
-      {
-        formId: 'SMD-FORM-SAFETY-01',
-        formTitle: 'إقرار استلام مهمات الوقاية الشخصية والسلامة (PPE)',
-        formCode: 'SMD-HSE-04',
-        category: 'السلامة والصحة المهنية',
-        sourceType: 'scanned',
-        sourceFileName: 'smd_safety_ppe_form.jpg',
-        uploadedAt: '2026-11-01',
-        description: 'نموذج صرف خوذة وأحذية سلامة ونظارات واقية وقناع غاز للمهندسين والفنيين بموقع مصنع السويس لمشتقات الميثانول',
-        headerPreamble: 'بناءً على تعليمات إدارة السلامة والصحة المهنية وحماية البيئة بمصنع السويس لمشتقات الميثانول، أقر أنا الموظف الموضح بياناته أدناه باستلام مهمات الوقاية الموضحة بحالة سليمة والتعهد بارتدائها بصفة مستمرة أثناء التواجد في وحدات التشغيل والإنتاج.',
-        fields: [
-          { id: 'f1', label: 'المهمات المسلمة', value: 'خوذة أمان بيضاء، حذاء سيفتي كود S3، نظارة واقية ضد الرذاذ الكيميائي، سدادات أذن، قناع واقي من الأبخرة' },
-          { id: 'f2', label: 'تاريخ الصرف والاستلام', value: new Date().toISOString().split('T')[0] },
-          { id: 'f3', label: 'موقع العمل والوحدة', value: 'مصنع السويس لمشتقات الميثانول - وحدة إنتاج الميثانول وراتنجات اليوريا' },
-          { id: 'f4', label: 'معايير الجودة المعتمدة', value: 'مطابق للمواصفات القياسية لقطاع البترول والسلامة والصحة المهنية (OSHA)' },
-          { id: 'f5', label: 'رقم إذن الصرف المخزني', value: 'WH-PPE-2026/894' }
-        ],
-        overlayFields: [
-          { id: 'ov-name', label: 'اسم الموظف', value: 'م. مروان أشرف الشريف', xPercent: 24, yPercent: 28, fontSize: 13, isBold: true, color: '#0f172a' },
-          { id: 'ov-id', label: 'كود الموظف (PIN)', value: '1001', xPercent: 74, yPercent: 28, fontSize: 13, isBold: true, color: '#1d4ed8' },
-          { id: 'ov-dept', label: 'الإدارة / الموقع', value: 'السلامه والصحه المهنيه وحمايه البيئه', xPercent: 24, yPercent: 34, fontSize: 12, isBold: false, color: '#0f172a' },
-          { id: 'ov-date', label: 'تاريخ الاستلام', value: new Date().toISOString().split('T')[0], xPercent: 74, yPercent: 34, fontSize: 12, isBold: false, color: '#0f172a' },
-          { id: 'ov-items', label: 'المهمات المسلمة', value: 'خوذة أمان، حذاء سيفتي S3، نظارة حماية كيميائية، قناع أبخرة عضوية', xPercent: 24, yPercent: 47, fontSize: 12, isBold: true, color: '#0f172a', widthPx: 380 },
-          { id: 'ov-order', label: 'إذن الصرف المخزني', value: 'WH-PPE-2026/894', xPercent: 24, yPercent: 55, fontSize: 12, isBold: false, color: '#0f172a' }
-        ],
-        footerNotes: '• أقر أنا الموظف بمسؤوليتي الكاملة عن الحفاظ على المهمات المسلمة واستخدامها طبقا للتعليمات المعتمدة.\n• في حالة التلف أو الفقد يتم إخطار مسؤول السلامة فوراً لاتخاذ إجراءات الاستبدال.',
-        signatures: [
-          { title: 'توقيع المستلم', name: 'الموظف المختص' },
-          { title: 'مسؤول السلامة والصحة المهنية', name: 'م. حسام الشريف' },
-          { title: 'مدير الإدارة', name: 'د. خالد توفيق' },
-          { title: 'اعتماد مدير عام المصنع', name: 'خاتم شعار الشركة SMD' }
-        ]
-      },
-      {
-        formId: 'SMD-FORM-TRANSFER-02',
-        formTitle: 'طلب نقل داخلي / تكليف بمهام إضافية',
-        formCode: 'SMD-HR-08',
-        category: 'الموارد البشرية',
-        sourceType: 'word',
-        sourceFileName: 'Internal_Transfer_SMD.docx',
-        uploadedAt: '2026-11-05',
-        description: 'نموذج رسمي لطلب النقل بين قطاعات الشركة أو التكليف بمهام مشروع توسعات الميثانول الجديد',
-        headerPreamble: 'أرجو التكرم بالموافقة على النظر في طلب النقل الداخلي / التكليف بمهام إضافية طبقاً لمتطلبات صالح العمل والخبرات التراكمية بالشركة.',
-        fields: [
-          { id: 'f1', label: 'الإدارة المطلوب النقل إليها', value: 'قطاع سلامه العمليات / الشؤون الفنيه والتخطيط' },
-          { id: 'f2', label: 'المسمى الوظيفي المقترح', value: 'مهندس أول عمليات وتنسيق فني' },
-          { id: 'f3', label: 'أسباب ومبررات النقل', value: 'المشاركة في مشروع التوسعات الجديدة واستغلال الخبرات الميدانية في تشغيل الخط الثاني' },
-          { id: 'f4', label: 'تاريخ بدء سريان التكليف', value: new Date().toISOString().split('T')[0] }
-        ],
-        overlayFields: [
-          { id: 'ov-emp', label: 'اسم الموظف', value: 'م. مروان أشرف الشريف', xPercent: 25, yPercent: 26, fontSize: 13, isBold: true, color: '#0f172a' },
-          { id: 'ov-pin', label: 'كود الموظف (PIN)', value: '1001', xPercent: 75, yPercent: 26, fontSize: 13, isBold: true, color: '#1d4ed8' },
-          { id: 'ov-cur-dept', label: 'الإدارة الحالية', value: 'السلامه والصحه المهنيه', xPercent: 25, yPercent: 33, fontSize: 12, isBold: false, color: '#0f172a' },
-          { id: 'ov-target-dept', label: 'الإدارة المنقول إليها', value: 'قطاع سلامه العمليات والتخطيط الفني', xPercent: 25, yPercent: 44, fontSize: 12, isBold: true, color: '#0f172a', widthPx: 350 }
-        ],
-        footerNotes: '• يتم تنفيذ النقل بعد موافقة مديري الإدارتين واعتماد الإدارة العامة للموارد البشرية.\n• يسلم الموظف كافة العهد والملفات للموظف البديل بموجب محضر تسليم رسمي.',
-        signatures: [
-          { title: 'توقيع الموظف', name: 'مقدم الطلب' },
-          { title: 'موافقة الإدارة الحالية', name: 'المدير المباشر' },
-          { title: 'موافقة الإدارة المنقول إليها', name: 'مدير الإدارة المستلمة' },
-          { title: 'اعتماد الموارد البشرية', name: 'أ. محمد عبد الرحمن' }
-        ]
-      }
-    ]);
+    // `any` is intentional: legacy form templates are free-form JSON blobs until
+    // the phase-4 typed document model lands.
+    return safeGet<any[]>(KEYS.CUSTOM_FORMS, []);
   },
   saveCustomForms(forms: any[]): void {
     safeSet(KEYS.CUSTOM_FORMS, forms);
@@ -340,12 +427,14 @@ export const StorageService = {
     this.saveCustomForms(list);
   },
 
-  // Full Database Backup & Restore
+  // ---------------------------------------------------------------------------
+  // Backup & restore
+  // ---------------------------------------------------------------------------
   exportDatabaseAsJson(): void {
     const backup = {
-      version: '1.0.0',
+      version: '1.1.0',
       company: 'Suez Methanol Derivatives Co. (SMD)',
-      exportedAt: new Date().toISOString(),
+      exportedAt: localTimestamp(),
       data: {
         employees: this.getEmployees(),
         leaveBalances: this.getLeaveBalances(),
@@ -356,18 +445,18 @@ export const StorageService = {
         devices: this.getDevices(),
         biometricLogs: this.getBiometricLogs(),
         customForms: this.getCustomForms(),
-        license: this.getLicense()
-      }
+        license: this.getLicense(),
+      },
     };
 
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `نسخة_احتياطية_شاملة_SMD_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `نسخة_احتياطية_شاملة_SMD_${localDateISO()}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
   },
 
@@ -388,46 +477,76 @@ export const StorageService = {
       if (data.license) this.saveLicense(data.license);
 
       return true;
-    } catch (e) {
-      console.error('Failed to import database JSON:', e);
+    } catch (error) {
+      console.error('Failed to import database JSON:', error);
       return false;
     }
   },
 
-  // License & Time-Lock
+  // ---------------------------------------------------------------------------
+  // License & time lock (UI-level only in phase 1; enforced on the server later)
+  // ---------------------------------------------------------------------------
   getLicense(): LicenseConfig {
     return safeGet<LicenseConfig>(KEYS.LICENSE, INITIAL_LICENSE);
   },
-  saveLicense(lic: LicenseConfig): void {
-    safeSet(KEYS.LICENSE, lic);
+  saveLicense(license: LicenseConfig): void {
+    safeSet(KEYS.LICENSE, license);
   },
 
   isSystemLocked(): { isLocked: boolean; reason?: string } {
-    const lic = this.getLicense();
-    if (lic.isTimeLocked) {
-      return { isLocked: true, reason: 'تم إيقاف تشغيل النظام يدوياً بواسطة مستخدم النظام user (مستخدم).' };
+    const license = this.getLicense();
+    if (license.isTimeLocked) {
+      return { isLocked: true, reason: 'تم إيقاف تشغيل النظام يدوياً من لوحة الترخيص.' };
     }
-    const today = new Date().toISOString().split('T')[0];
-    if (lic.expiryDate && today > lic.expiryDate) {
+    const today = localDateISO();
+    if (license.expiryDate && today > license.expiryDate) {
       return {
         isLocked: true,
-        reason: `انتهت صلاحية ترخيص البرنامج في تاريخ ${lic.expiryDate}. يرجى تجديد الترخيص مع إدارة نظم المعلومات بشركة السويس لمشتقات الميثانول.`
+        reason: `انتهت صلاحية ترخيص البرنامج في تاريخ ${license.expiryDate}. يرجى تجديد الترخيص مع إدارة نظم المعلومات بشركة السويس لمشتقات الميثانول.`,
       };
     }
     return { isLocked: false };
   },
 
-  // Reset all to initial state
+  // ---------------------------------------------------------------------------
+  // Reset helpers
+  // ---------------------------------------------------------------------------
+  /** Removes only records flagged as demo (`isDemo` or employee code >= 9000). */
+  resetDemoData(): void {
+    const demoEmployeeIds = new Set(
+      this.getEmployees()
+        .filter((employee) => isDemoEmployee(employee))
+        .map((employee) => employee.employeeId),
+    );
+
+    this.saveEmployees(
+      this.getEmployees().filter((employee) => !isDemoEmployee(employee)),
+    );
+    this.saveLeaveBalances(
+      this.getLeaveBalances().filter(
+        (balance) => !demoEmployeeIds.has(balance.employeeId) && balance.isDemo !== true,
+      ),
+    );
+    this.saveLeaves(this.getLeaves().filter((leave) => leave.isDemo !== true));
+    this.savePermits(this.getPermits().filter((permit) => permit.isDemo !== true));
+    this.saveMissions(this.getMissions().filter((mission) => mission.isDemo !== true));
+    this.saveAttendance(
+      this.getAttendance().filter(
+        (record) => !demoEmployeeIds.has(record.employeeId) && record.isDemo !== true,
+      ),
+    );
+    this.saveBiometricLogs(
+      this.getBiometricLogs().filter((log) => log.isDemo !== true),
+    );
+    this.saveDevices(this.getDevices().filter((device) => device.isDemo !== true));
+  },
+
+  /** Restores the full demo dataset (used by support and UAT). */
   resetAllData(): void {
-    localStorage.removeItem(KEYS.EMPLOYEES);
-    localStorage.removeItem(KEYS.LEAVE_BALANCES);
-    localStorage.removeItem(KEYS.LEAVES);
-    localStorage.removeItem(KEYS.PERMITS);
-    localStorage.removeItem(KEYS.MISSIONS);
-    localStorage.removeItem(KEYS.ATTENDANCE);
-    localStorage.removeItem(KEYS.DEVICES);
-    localStorage.removeItem(KEYS.BIOMETRIC_LOGS);
-    localStorage.removeItem(KEYS.LICENSE);
-    localStorage.removeItem(KEYS.CUSTOM_FORMS);
-  }
+    Object.values(KEYS).forEach((key) => {
+      if (key === KEYS.USER_SESSION) return;
+      localStorage.removeItem(key);
+    });
+    safeSet(KEYS.DATA_VERSION, CURRENT_DATA_VERSION);
+  },
 };

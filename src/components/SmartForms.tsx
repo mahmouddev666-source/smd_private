@@ -38,9 +38,11 @@ import {
   Type,
   Maximize2,
   RefreshCw,
-  Palette
+  Palette,
+  AlertTriangle
 } from 'lucide-react';
 import { exportToWordDocument } from '../utils/fileExport';
+import { addDaysISO, localDateISO } from '../utils/dateUtils';
 import { PhotoImportModal } from './PhotoImportModal';
 import { StorageService } from '../services/storage';
 import { 
@@ -70,6 +72,8 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
   const [selectedEmpId, setSelectedEmpId] = useState<string>(initialEmployeeId || employees[0]?.employeeId || '');
   const [showPhotoModal, setShowPhotoModal] = useState<boolean>(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [pendingDeleteFormId, setPendingDeleteFormId] = useState<string | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
 
   // View Mode: 'visual' (Overlay on real document), 'structured' (Digital letterhead), 'word_html', 'excel_grid'
@@ -86,7 +90,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
 
   // Standard Leave Form State
   const [leaveType, setLeaveType] = useState<LeaveType>('اعتيادي');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(localDateISO());
   const [daysCount, setDaysCount] = useState(4);
   const [reason, setReason] = useState('ظروف عائلية وقضاء إجازة سنوية');
   const [replacementName, setReplacementName] = useState('م. طارق الشناوي (رئيس قسم الصيانة)');
@@ -122,7 +126,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
           { id: 'ov-pin', label: 'كود الموظف (PIN)', value: employee?.employeeId || '', xPercent: 76, yPercent: 26, fontSize: 13, isBold: true, color: '#1d4ed8' },
           { id: 'ov-dept', label: 'الإدارة / القطاع', value: employee?.department || '', xPercent: 25, yPercent: 33, fontSize: 12, isBold: false, color: '#0f172a' },
           { id: 'ov-title', label: 'المسمى الوظيفي', value: employee?.currentTitle || '', xPercent: 76, yPercent: 33, fontSize: 12, isBold: false, color: '#0f172a' },
-          { id: 'ov-date', label: 'التاريخ', value: new Date().toISOString().split('T')[0], xPercent: 76, yPercent: 40, fontSize: 12, isBold: false, color: '#0f172a' },
+          { id: 'ov-date', label: 'التاريخ', value: localDateISO(), xPercent: 76, yPercent: 40, fontSize: 12, isBold: false, color: '#0f172a' },
           { id: 'ov-notes', label: 'بيانات / قرار / ملاحظات', value: activeCustomTemplate.headerPreamble || '', xPercent: 25, yPercent: 48, fontSize: 12, isBold: false, color: '#0f172a', widthPx: 380 }
         ];
         setOverlayFields(defaults);
@@ -144,7 +148,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
   // Handle Employee Auto-Fill onto the current overlay
   const handleAutoFillEmployee = () => {
     if (!employee) return;
-    const now = new Date().toISOString().split('T')[0];
+    const now = localDateISO();
 
     setOverlayFields(prev => prev.map(f => {
       const label = f.label.toLowerCase();
@@ -225,6 +229,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
     if (!file) return;
 
     setIsProcessingFile(true);
+    setErrorNotice(null);
     try {
       const template = await parseFormFile(file);
       
@@ -256,7 +261,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
       setTimeout(() => setNotice(null), 8000);
     } catch (err) {
       console.error(err);
-      alert('حدث خطأ أثناء قراءة المستند. يرجى تجربة ملف آخر.');
+      setErrorNotice(`تعذّر قراءة الملف "${file.name}". تأكد أن الملف PDF أو Word أو Excel أو صورة سليمة، وحجمه أقل من 20 ميجابايت.`);
     } finally {
       setIsProcessingFile(false);
       if (universalFileInputRef.current) universalFileInputRef.current.value = '';
@@ -274,18 +279,18 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
       category: scanned.category || 'السلامة والصحة المهنية',
       sourceType: 'scanned',
       sourceFileName: 'camera_capture.jpg',
-      uploadedAt: new Date().toISOString().split('T')[0],
+      uploadedAt: localDateISO(),
       description: scanned.previewSnippet || 'صورة المستند الورقي الأصلي للشركة',
       headerPreamble: 'بناءً على وثائق ولوائح شركة السويس لمشتقات الميثانول SMD، يحرر هذا النموذج الرسمي معتمداً.',
       fields: [
         { id: 'f1', label: 'المهمة / الصنف', value: scanned.previewSnippet || 'مهمات وقاية شخصية' },
-        { id: 'f2', label: 'التاريخ', value: new Date().toISOString().split('T')[0] }
+        { id: 'f2', label: 'التاريخ', value: localDateISO() }
       ],
       overlayFields: [
         { id: 'ov-name', label: 'اسم الموظف', value: employee?.name || '', xPercent: 24, yPercent: 28, fontSize: 13, isBold: true, color: '#0f172a' },
         { id: 'ov-id', label: 'كود الموظف (PIN)', value: employee?.employeeId || '', xPercent: 74, yPercent: 28, fontSize: 13, isBold: true, color: '#1d4ed8' },
         { id: 'ov-dept', label: 'الإدارة', value: employee?.department || '', xPercent: 24, yPercent: 34, fontSize: 12, isBold: false, color: '#0f172a' },
-        { id: 'ov-date', label: 'التاريخ', value: new Date().toISOString().split('T')[0], xPercent: 74, yPercent: 34, fontSize: 12, isBold: false, color: '#0f172a' }
+        { id: 'ov-date', label: 'التاريخ', value: localDateISO(), xPercent: 74, yPercent: 34, fontSize: 12, isBold: false, color: '#0f172a' }
       ],
       footerNotes: '• تم استيراد صورة المستند وتعبئتها آلياً عبر منظومة الموارد البشرية بشركة SMD.',
       signatures: [
@@ -307,14 +312,18 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
 
   // Delete Form
   const handleDeleteForm = (formId: string) => {
-    if (confirm('هل أنت متأكد من حذف هذا النموذج؟')) {
-      const updated = customTemplates.filter(t => t.formId !== formId);
-      setCustomTemplates(updated);
-      StorageService.saveCustomForms(updated);
-      setSelectedFormType('SMD-FORM-SAFETY-01');
-      setNotice('تم حذف النموذج بنجاح.');
-      setTimeout(() => setNotice(null), 3000);
-    }
+    setPendingDeleteFormId(formId);
+  };
+
+  const confirmDeleteForm = () => {
+    if (!pendingDeleteFormId) return;
+    const updated = customTemplates.filter(t => t.formId !== pendingDeleteFormId);
+    setCustomTemplates(updated);
+    StorageService.saveCustomForms(updated);
+    setSelectedFormType('SMD-FORM-SAFETY-01');
+    setPendingDeleteFormId(null);
+    setNotice('تم حذف النموذج بنجاح.');
+    setTimeout(() => setNotice(null), 3000);
   };
 
   // Print
@@ -354,6 +363,39 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
             <span>{notice}</span>
           </div>
           <button onClick={() => setNotice(null)} className="text-emerald-700 hover:text-emerald-900 font-bold">✕</button>
+        </div>
+      )}
+
+      {errorNotice && (
+        <div role="alert" className="p-3.5 bg-rose-50 border border-rose-300 text-rose-900 rounded-xl text-xs font-bold flex items-center justify-between shadow-xs no-print">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorNotice}</span>
+          </div>
+          <button onClick={() => setErrorNotice(null)} className="text-rose-700 hover:text-rose-900 font-bold">✕</button>
+        </div>
+      )}
+
+      {pendingDeleteFormId && (
+        <div role="alertdialog" aria-modal="true" className="p-3.5 bg-amber-50 border border-amber-300 text-amber-900 rounded-xl text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs no-print">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>هل أنت متأكد من حذف هذا النموذج؟ لا يمكن التراجع عن هذا الإجراء.</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={confirmDeleteForm}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold"
+            >
+              تأكيد الحذف
+            </button>
+            <button
+              onClick={() => setPendingDeleteFormId(null)}
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
         </div>
       )}
 
@@ -647,7 +689,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
 
                   <div className="text-left font-mono text-xs text-slate-600">
                     <div>الكود: {activeCustomTemplate?.formCode || 'SMD-DOC-2026'}</div>
-                    <div>التاريخ: {new Date().toISOString().split('T')[0]}</div>
+                    <div>التاريخ: {localDateISO()}</div>
                     <div>الرقم: {employee?.serial || 1}</div>
                   </div>
                 </div>
@@ -991,7 +1033,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
 
             <div className="text-left font-mono text-xs text-slate-600">
               <div>الكود: {selectedFormType === 'leave' ? 'SMD-HR-01' : selectedFormType === 'mission' ? 'SMD-HR-02' : 'SMD-HR-03'}</div>
-              <div>التاريخ: {new Date().toISOString().split('T')[0]}</div>
+              <div>التاريخ: {localDateISO()}</div>
               <div>الرقم: {employee?.serial || 1}</div>
             </div>
           </div>
@@ -1042,7 +1084,7 @@ export const SmartForms: React.FC<SmartFormsProps> = ({
           {selectedFormType === 'leave' && (
             <div className="space-y-4 text-xs">
               <p>
-                أرجو التكرم بالموافقة على منحي إجازة <strong>({leaveType})</strong> لمدة <strong>({daysCount}) أيام</strong> تبدأ من تاريخ <strong>({startDate})</strong> وحتى تاريخ <strong>({new Date(new Date(startDate).getTime() + (daysCount - 1) * 86400000).toISOString().split('T')[0]})</strong>، وذلك نظراً لـ: <u>{reason}</u>.
+                أرجو التكرم بالموافقة على منحي إجازة <strong>({leaveType})</strong> لمدة <strong>({daysCount}) أيام</strong> تبدأ من تاريخ <strong>({startDate})</strong> وحتى تاريخ <strong>({addDaysISO(startDate, daysCount - 1)})</strong>، وذلك نظراً لـ: <u>{reason}</u>.
               </p>
               <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 border border-slate-200 rounded text-center">
                 <div>

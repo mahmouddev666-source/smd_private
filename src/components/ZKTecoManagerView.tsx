@@ -48,6 +48,17 @@ export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [showCode, setShowCode] = useState<boolean>(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  const copyServiceCode = async () => {
+    try {
+      await navigator.clipboard.writeText(PYTHON_ZKTECO_SERVICE);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
+    }
+    setTimeout(() => setCopyStatus('idle'), 3000);
+  };
 
   const empMap = new Map(employees.map(e => [e.employeeId, e]));
 
@@ -266,15 +277,20 @@ export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
               <Terminal className="w-4 h-4 text-emerald-400" />
               <span className="text-xs font-bold text-white font-mono">zkteco_service.py (Python TCP/IP Integration)</span>
             </div>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(PYTHON_ZKTECO_SERVICE);
-                alert('تم نسخ كود بايثون ZKTeco إلى الحافظة!');
-              }}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-mono transition-colors cursor-pointer"
-            >
-              نسخ الكود
-            </button>
+            <div className="flex items-center gap-2">
+              {copyStatus === 'copied' && (
+                <span className="text-[11px] font-bold text-emerald-400">تم النسخ إلى الحافظة ✓</span>
+              )}
+              {copyStatus === 'error' && (
+                <span className="text-[11px] font-bold text-rose-400">تعذّر النسخ، حدد الكود يدويًا</span>
+              )}
+              <button
+                onClick={copyServiceCode}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-mono transition-colors cursor-pointer"
+              >
+                نسخ الكود
+              </button>
+            </div>
           </div>
           <pre className="text-xs font-mono overflow-x-auto text-emerald-300 p-3 bg-slate-950 rounded-lg max-h-96" dir="ltr">
             {PYTHON_ZKTECO_SERVICE}

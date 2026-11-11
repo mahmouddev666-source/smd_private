@@ -23,10 +23,12 @@ import {
   DollarSign,
   Camera,
   Upload,
-  Download
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 import { PhotoImportModal } from './PhotoImportModal';
 import { parseExcelFile, exportPermitsToExcel, exportMissionsToExcel } from '../utils/fileExport';
+import { localDateISO } from '../utils/dateUtils';
 
 interface PermitsAndMissionsProps {
   permits: PermitRecord[];
@@ -52,13 +54,14 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
   const [showAddMissionModal, setShowAddMissionModal] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
 
   const excelFileRef = useRef<HTMLInputElement | null>(null);
 
   // Permit Form State
   const [pEmpId, setPEmpId] = useState(employees[0]?.employeeId || '');
   const [pType, setPType] = useState<PermitType>('إذن شخصي');
-  const [pDate, setPDate] = useState(new Date().toISOString().split('T')[0]);
+  const [pDate, setPDate] = useState(localDateISO());
   const [pStart, setPStart] = useState('11:00');
   const [pEnd, setPEnd] = useState('13:00');
   const [pDuration, setPDuration] = useState(2);
@@ -69,8 +72,8 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
   const [mType, setMType] = useState<MissionType>('مأمورية ببدل');
   const [mDestination, setMDestination] = useState('');
   const [mPurpose, setMPurpose] = useState('');
-  const [mStart, setMStart] = useState(new Date().toISOString().split('T')[0]);
-  const [mEnd, setMEnd] = useState(new Date().toISOString().split('T')[0]);
+  const [mStart, setMStart] = useState(localDateISO());
+  const [mEnd, setMEnd] = useState(localDateISO());
   const [mDays, setMDays] = useState(2);
   const [mAllowancePerDay, setMAllowancePerDay] = useState(450);
   const [mTransport, setMTransport] = useState<'سيارة الشركة' | 'قطار / حافلة' | 'طيران' | 'خاصة ببدل انتقال'>('سيارة الشركة');
@@ -117,12 +120,18 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
   };
 
   const handlePhotoImport = (rows: any[]) => {
+    setImportErrorMsg(null);
+    const fallbackEmployeeId = employees[0]?.employeeId || '';
+    const knownEmployeeIds = new Set(employees.map(emp => emp.employeeId));
     if (activeTab === 'permits') {
+      let count = 0;
       rows.forEach(r => {
+        const empId = String(r.employeeId || fallbackEmployeeId);
+        if (!knownEmployeeIds.has(empId)) return;
         onAddPermit({
-          employeeId: r.employeeId || employees[0]?.employeeId || '1001',
+          employeeId: empId,
           permitType: r.permitType || 'إذن شخصي',
-          date: r.date || new Date().toISOString().split('T')[0],
+          date: r.date || localDateISO(),
           startTime: r.startTime || '10:00',
           endTime: r.endTime || '12:00',
           durationHours: Number(r.durationHours) || 2,
@@ -130,17 +139,24 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
           status: 'معتمد',
           approvedBy: user.name
         });
+        count++;
       });
-      setImportNotice(`تم استيراد ${rows.length} تصريح / إذن بنجاح عبر الكاميرا والمسح الضوئي.`);
+      setImportNotice(
+        `تم استيراد ${count} تصريح / إذن بنجاح عبر الكاميرا والمسح الضوئي.` +
+        (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+      );
     } else {
+      let count = 0;
       rows.forEach(r => {
+        const empId = String(r.employeeId || fallbackEmployeeId);
+        if (!knownEmployeeIds.has(empId)) return;
         onAddMission({
-          employeeId: r.employeeId || employees[0]?.employeeId || '1001',
+          employeeId: empId,
           missionType: r.missionType || 'مأمورية ببدل',
           destination: r.destination || 'موقع الشركة',
           purpose: r.purpose || 'مأمورية مستخرجة ضوئياً',
-          startDate: r.startDate || new Date().toISOString().split('T')[0],
-          endDate: r.endDate || new Date().toISOString().split('T')[0],
+          startDate: r.startDate || localDateISO(),
+          endDate: r.endDate || localDateISO(),
           daysCount: Number(r.daysCount) || 1,
           allowancePerDay: Number(r.allowancePerDay) || 450,
           totalAllowance: Number(r.totalAllowance) || (Number(r.daysCount || 1) * 450),
@@ -148,8 +164,12 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
           status: 'معتمد',
           approvedBy: user.name
         });
+        count++;
       });
-      setImportNotice(`تم استيراد ${rows.length} أمر مأمورية بنجاح عبر الكاميرا والمسح الضوئي.`);
+      setImportNotice(
+        `تم استيراد ${count} أمر مأمورية بنجاح عبر الكاميرا والمسح الضوئي.` +
+        (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+      );
     }
     setTimeout(() => setImportNotice(null), 5000);
   };
@@ -157,17 +177,26 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
   const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImportErrorMsg(null);
+
+    const fallbackEmployeeId = employees[0]?.employeeId || '';
+    const knownEmployeeIds = new Set(employees.map(emp => emp.employeeId));
 
     try {
       const rows = await parseExcelFile(file);
+      if (rows.length === 0) {
+        setImportErrorMsg('الملف فارغ أو لا يحتوي على بيانات صالحة.');
+        return;
+      }
       if (activeTab === 'permits') {
         let count = 0;
         rows.forEach((r: any) => {
-          const empId = String(r['كود الموظف'] || r.employeeId || employees[0]?.employeeId || '1001');
+          const empId = String(r['كود الموظف'] || r.employeeId || fallbackEmployeeId);
+          if (!knownEmployeeIds.has(empId)) return;
           onAddPermit({
             employeeId: empId,
             permitType: (r['نوع الإذن'] || r.permitType || 'إذن شخصي') as PermitType,
-            date: String(r['التاريخ'] || r.date || new Date().toISOString().split('T')[0]),
+            date: String(r['التاريخ'] || r.date || localDateISO()),
             startTime: String(r['من الساعة'] || r.startTime || '09:00'),
             endTime: String(r['إلى الساعة'] || r.endTime || '11:00'),
             durationHours: Number(r['المدة (ساعات)'] || r.durationHours || 2),
@@ -177,11 +206,15 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
           });
           count++;
         });
-        setImportNotice(`تم استيراد ${count} إذن وتصريح خروج من ملف Excel بنجاح.`);
+        setImportNotice(
+          `تم استيراد ${count} إذن وتصريح خروج من ملف Excel بنجاح.` +
+          (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+        );
       } else {
         let count = 0;
         rows.forEach((r: any) => {
-          const empId = String(r['كود الموظف'] || r.employeeId || employees[0]?.employeeId || '1001');
+          const empId = String(r['كود الموظف'] || r.employeeId || fallbackEmployeeId);
+          if (!knownEmployeeIds.has(empId)) return;
           const days = Number(r['عدد الأيام'] || r.daysCount || 1);
           const perDay = Number(r['البدل اليومي'] || r.allowancePerDay || 450);
           onAddMission({
@@ -189,8 +222,8 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
             missionType: (r['نوع المأمورية'] || r.missionType || 'مأمورية ببدل') as MissionType,
             destination: String(r['الجهة والموقع'] || r.destination || 'موقع السويس'),
             purpose: String(r['الغرض من التكليف'] || r.purpose || 'مستورد من ملف Excel'),
-            startDate: String(r['تاريخ البدء'] || r.startDate || new Date().toISOString().split('T')[0]),
-            endDate: String(r['تاريخ العودة'] || r.endDate || new Date().toISOString().split('T')[0]),
+            startDate: String(r['تاريخ البدء'] || r.startDate || localDateISO()),
+            endDate: String(r['تاريخ العودة'] || r.endDate || localDateISO()),
             daysCount: days,
             allowancePerDay: perDay,
             totalAllowance: Number(r['إجمالي البدل (ج.م)'] || r.totalAllowance || (days * perDay)),
@@ -200,12 +233,15 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
           });
           count++;
         });
-        setImportNotice(`تم استيراد ${count} مأمورية رسمية من ملف Excel بنجاح.`);
+        setImportNotice(
+          `تم استيراد ${count} مأمورية رسمية من ملف Excel بنجاح.` +
+          (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+        );
       }
       setTimeout(() => setImportNotice(null), 5000);
     } catch (err) {
       console.error(err);
-      alert('حدث خطأ أثناء قراءة ملف Excel، يرجى التأكد من صحة الملف وصيغته.');
+      setImportErrorMsg('حدث خطأ أثناء قراءة ملف Excel، يرجى التأكد من صحة الملف وصيغته.');
     } finally {
       if (excelFileRef.current) excelFileRef.current.value = '';
     }
@@ -239,6 +275,16 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
             <span>{importNotice}</span>
           </div>
           <button onClick={() => setImportNotice(null)} className="text-emerald-700 hover:text-emerald-900 font-bold">✕</button>
+        </div>
+      )}
+
+      {importErrorMsg && (
+        <div className="p-3.5 bg-rose-50 border border-rose-300 text-rose-900 rounded-xl text-xs font-bold flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <span>{importErrorMsg}</span>
+          </div>
+          <button onClick={() => setImportErrorMsg(null)} className="text-rose-700 hover:text-rose-900 font-bold">✕</button>
         </div>
       )}
 
@@ -284,7 +330,7 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
             <span>تصدير Excel</span>
           </button>
 
-          {user.role === 'ADMIN' && (
+          {user.role !== 'VIEWER' && (
             <>
               {activeTab === 'permits' ? (
                 <button

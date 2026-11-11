@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { LicenseConfig, UserSession, UserRole } from '../types';
+import { daysAgoISO, localDateISO } from '../utils/dateUtils';
 import { 
   Lock, 
   Unlock, 
@@ -38,7 +39,7 @@ export const LicensingManager: React.FC<LicensingManagerProps> = ({
   const [licenseType, setLicenseType] = useState(license.licenseType);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  const isExpired = new Date().toISOString().split('T')[0] > license.expiryDate;
+  const isExpired = localDateISO() > license.expiryDate;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +48,7 @@ export const LicensingManager: React.FC<LicensingManagerProps> = ({
       expiryDate,
       licenseKey,
       licenseType: licenseType as any,
-      lastVerifiedAt: new Date().toISOString().split('T')[0]
+      lastVerifiedAt: localDateISO()
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
@@ -62,7 +63,7 @@ export const LicensingManager: React.FC<LicensingManagerProps> = ({
 
   const handleTestLockoutNow = () => {
     // Set expiry to yesterday to trigger lock
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const yesterday = daysAgoISO(1);
     setExpiryDate(yesterday);
     onUpdateLicense({
       ...license,
@@ -229,30 +230,40 @@ export const LicensingManager: React.FC<LicensingManagerProps> = ({
             <span className="font-bold text-slate-800 block">
               تبديل صلاحية المستخدم الحالي (Testing Roles):
             </span>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => onSwitchRole('ADMIN')}
-                className={`py-2 px-3 rounded-lg font-bold border transition-colors cursor-pointer ${
+                className={`py-2 px-2 rounded-lg font-bold border transition-colors cursor-pointer ${
                   user.role === 'ADMIN'
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-white text-slate-700 border-slate-200'
                 }`}
               >
-                مستخدم user (مستخدم)
+                مدير النظام
+              </button>
+              <button
+                onClick={() => onSwitchRole('HR')}
+                className={`py-2 px-2 rounded-lg font-bold border transition-colors cursor-pointer ${
+                  user.role === 'HR'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-slate-700 border-slate-200'
+                }`}
+              >
+                موارد بشرية
               </button>
               <button
                 onClick={() => onSwitchRole('VIEWER')}
-                className={`py-2 px-3 rounded-lg font-bold border transition-colors cursor-pointer ${
+                className={`py-2 px-2 rounded-lg font-bold border transition-colors cursor-pointer ${
                   user.role === 'VIEWER'
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-white text-slate-700 border-slate-200'
                 }`}
               >
-                مستخدم قراءة فقط
+                قراءة فقط
               </button>
             </div>
             <p className="text-[11px] text-slate-500">
-              المستخدم القارئ (Viewer) يتمتع بإمكانية عرض التقارير والشاشات فقط دون تعديل أو إيقاف.
+              المستخدم القارئ (Viewer) يتمتع بإمكانية عرض التقارير والشاشات فقط دون تعديل أو إيقاف. دور الموارد البشرية يعدّل البيانات التشغيلية دون إدارة الترخيص.
             </p>
           </div>
 

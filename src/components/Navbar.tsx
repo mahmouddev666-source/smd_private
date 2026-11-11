@@ -129,12 +129,18 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Role indicator */}
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/80 rounded-lg text-blue-900 text-xs font-bold border border-blue-200">
-              {user.role === 'ADMIN' ? (
-                <ShieldCheck className="w-4 h-4 text-blue-600" />
-              ) : (
+              {user.role === 'VIEWER' ? (
                 <ShieldAlert className="w-4 h-4 text-amber-600" />
+              ) : (
+                <ShieldCheck className="w-4 h-4 text-blue-600" />
               )}
-              <span className="whitespace-nowrap font-sans">{user.role === 'ADMIN' ? 'مستخدم user (مستخدم)' : 'مستخدم قراءة فقط'}</span>
+              <span className="whitespace-nowrap font-sans">
+                {user.role === 'ADMIN'
+                  ? 'مدير النظام'
+                  : user.role === 'HR'
+                    ? 'موارد بشرية (محرر)'
+                    : 'مستخدم قراءة فقط'}
+              </span>
             </div>
 
             {/* Quick Licensing / Time-Lock trigger for Admin */}
