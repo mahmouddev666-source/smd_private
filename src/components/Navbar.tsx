@@ -68,7 +68,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'permits', label: 'الأذونات والمأموريات', icon: Briefcase },
     { id: 'zkteco', label: 'أجهزة ZKTeco', icon: Cpu },
     { id: 'reports', label: 'التحليل القطاعي', icon: BarChart3 },
-    { id: 'forms', label: 'النماذج الذكية', icon: FileText },
+    { id: 'forms', label: 'النماذج والمستندات', icon: FileText },
     { id: 'architecture', label: 'المعمارية و SQL', icon: Database },
   ];
 

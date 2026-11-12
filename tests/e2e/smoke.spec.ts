@@ -50,13 +50,23 @@ test.describe('SMD-HR baseline', () => {
       'الأذونات والمأموريات',
       'أجهزة ZKTeco',
       'التحليل القطاعي',
-      'النماذج الذكية',
+      'النماذج والمستندات',
     ];
 
     for (const tab of tabs) {
       await page.getByRole('button', {name: tab}).first().click();
       await expect(page.locator('main')).toBeVisible();
     }
+  });
+
+  test('forms tab is honest about needing the server in demo mode', async ({page}) => {
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await page.getByRole('button', {name: 'النماذج والمستندات'}).first().click();
+
+    await expect(page.getByRole('heading', {name: 'مكتبة مستندات الشركة'})).toBeVisible();
+    await expect(page.getByText(/مكتبة المستندات تعمل على الخادم فقط/)).toBeVisible();
+    // No fake upload UI while the API is unreachable.
+    await expect(page.getByRole('button', {name: 'رفع مستند'})).toHaveCount(0);
   });
 
   test('the overtime calculator produces a result', async ({page}) => {

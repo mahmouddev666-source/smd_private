@@ -218,6 +218,77 @@ export interface BiometricLogEntry {
   isDemo?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Document engine (company forms uploaded to the server)
+// ---------------------------------------------------------------------------
+
+export type FormFileKind = 'pdf' | 'image' | 'word' | 'excel';
+
+export interface FormFile {
+  id: string;
+  originalName: string;
+  mime: string;
+  kind: FormFileKind;
+  sizeBytes: number;
+  pageCount: number;
+  createdAt: string;
+}
+
+export type FormFieldAlign = 'right' | 'center' | 'left';
+
+/**
+ * One field drawn on top of the original document.
+ * Coordinates are relative percentages of the page (0–100), so the same
+ * template renders identically at any zoom level and in print.
+ */
+export interface FormFieldPlacement {
+  key: string;
+  /** Data binding, e.g. `employee.name` or `leave.startDate`. */
+  binding: string;
+  label: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontWeight: 'normal' | 'bold';
+  align: FormFieldAlign;
+  color: string;
+}
+
+export interface FormTemplate {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  fileId: string;
+  fields: FormFieldPlacement[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FormTemplateInput {
+  name: string;
+  category: string;
+  description: string;
+  fileId: string;
+  fields: FormFieldPlacement[];
+}
+
+export type FormSubmissionStatus = 'مسودة' | 'نهائي';
+
+export interface FormSubmission {
+  id: string;
+  templateId: string;
+  employeeId?: string;
+  values: Record<string, string | number>;
+  status: FormSubmissionStatus;
+  createdBy?: string;
+  createdAt: string;
+}
+
 export interface LicenseConfig {
   companyName: string;
   licenseKey: string;

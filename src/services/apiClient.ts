@@ -9,6 +9,12 @@
 import {
   AttendanceRecord,
   Employee,
+  FormFieldPlacement,
+  FormFile,
+  FormFileKind,
+  FormSubmission,
+  FormTemplate,
+  FormTemplateInput,
   LeaveBalance,
   LeaveRecord,
   MissionRecord,
@@ -723,4 +729,317 @@ export async function updateDevice(device: ZKTecoDevice): Promise<ZKTecoDevice> 
 
 export async function deleteDevice(deviceId: string): Promise<void> {
   await request(`/devices/${deviceId}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Document engine: company forms (files, templates, submissions)
+// ---------------------------------------------------------------------------
+
+interface FormFileDto {
+  id: string;
+  original_name: string;
+  mime: string;
+  kind: string;
+  size_bytes: number;
+  page_count: number;
+  created_at: string;
+}
+
+interface FieldPlacementDto {
+  key: string;
+  binding: string;
+  label: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  font_size: number;
+  font_weight: 'normal' | 'bold';
+  align: 'right' | 'center' | 'left';
+  color: string;
+}
+
+interface FormTemplateDto {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  file_id: string;
+  fields: FieldPlacementDto[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FormSubmissionDto {
+  id: string;
+  template_id: string;
+  employee_id: string | null;
+  values: Record<string, string | number>;
+  status: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+const FORM_FILE_KINDS: FormFileKind[] = ['pdf', 'image', 'word', 'excel'];
+
+function mapFormFile(dto: FormFileDto): FormFile {
+  return {
+    id: dto.id,
+    originalName: dto.original_name,
+    mime: dto.mime,
+    kind: (FORM_FILE_KINDS as string[]).includes(dto.kind) ? (dto.kind as FormFileKind) : 'pdf',
+    sizeBytes: dto.size_bytes,
+    pageCount: dto.page_count,
+    createdAt: dto.created_at,
+  };
+}
+
+/** Server → UI. Also used by the designer to reload a single field. */
+export function mapFieldPlacement(dto: FieldPlacementDto): FormFieldPlacement {
+  return {
+    key: dto.key,
+    binding: dto.binding,
+    label: dto.label || '',
+    page: dto.page,
+    x: dto.x,
+    y: dto.y,
+    width: dto.width,
+    height: dto.height,
+    fontSize: dto.font_size,
+    fontWeight: dto.font_weight,
+    align: dto.align,
+    color: dto.color,
+  };
+}
+
+function fieldToDto(field: FormFieldPlacement): FieldPlacementDto {
+  return {
+    key: field.key,
+    binding: field.binding,
+    label: field.label,
+    page: field.page,
+    x: field.x,
+    y: field.y,
+    width: field.width,
+    height: field.height,
+    font_size: field.fontSize,
+    font_weight: field.fontWeight,
+    align: field.align,
+    color: field.color,
+  };
+}
+
+export function mapFormTemplate(dto: FormTemplateDto): FormTemplate {
+  return {
+    id: dto.id,
+    name: dto.name,
+    category: dto.category,
+    description: dto.description,
+    fileId: dto.file_id,
+    fields: (dto.fields || []).map(mapFieldPlacement),
+    isActive: dto.is_active,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+export function mapFormSubmission(dto: FormSubmissionDto): FormSubmission {
+  return {
+    id: dto.id,
+    templateId: dto.template_id,
+    employeeId: dto.employee_id || undefined,
+    values: dto.values || {},
+    status: dto.status === 'مسودة' ? 'مسودة' : 'نهائي',
+    createdBy: dto.created_by || undefined,
+    createdAt: dto.created_at,
+  };
+}
+
+/** Parse a failed fetch/XHR response into the shared `ApiError` shape. */
+async function readErrorResponse(response: Response): Promise<ApiError> {
+  if (response.status === 401) {
+    setToken(null);
+    setStoredSession(null);
+  }
+  let detail = `فشل الطلب (${response.status}). يرجى المحاولة مرة أخرى.`;
+  let code = 'HTTP_ERROR';
+  try {
+    const body = (await response.json()) as { detail?: unknown; code?: string };
+    if (typeof body.detail === 'string') detail = body.detail;
+    if (body.code) code = body.code;
+  } catch {
+    /* non-JSON body (e.g. nginx error page) */
+  }
+  return new ApiError(response.status, detail, code);
+}
+
+/**
+ * Upload a company document. Uses XHR instead of `fetch` only because it
+ * exposes upload progress for large (up to 20MB) files.
+ */
+export function uploadFormFile(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<FormFile> {
+  return new Promise<FormFile>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/forms/files`);
+    xhr.setRequestHeader('Accept', 'application/json');
+    const token = getToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+      }
+    };
+    xhr.onerror = () => reject(new NetworkError());
+    xhr.ontimeout = () => reject(new NetworkError('انتهت مهلة رفع الملف. حاول مرة أخرى.'));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          onProgress?.(100);
+          resolve(mapFormFile(JSON.parse(xhr.responseText) as FormFileDto));
+        } catch {
+          reject(new ApiError(xhr.status, 'استجابة غير صالحة من الخادم.', 'INVALID_RESPONSE'));
+        }
+        return;
+      }
+      if (xhr.status === 401) {
+        setToken(null);
+        setStoredSession(null);
+      }
+      let detail = `فشل رفع الملف (${xhr.status}). يرجى المحاولة مرة أخرى.`;
+      let code = 'HTTP_ERROR';
+      try {
+        const body = JSON.parse(xhr.responseText) as { detail?: unknown; code?: string };
+        if (typeof body.detail === 'string') detail = body.detail;
+        if (body.code) code = body.code;
+      } catch {
+        /* non-JSON body */
+      }
+      reject(new ApiError(xhr.status, detail, code));
+    };
+
+    const payload = new FormData();
+    payload.append('file', file, file.name);
+    xhr.send(payload);
+  });
+}
+
+export async function fetchFormFiles(): Promise<FormFile[]> {
+  const rows = await fetchAllPages<FormFileDto>('/forms/files');
+  return rows.map(mapFormFile);
+}
+
+export async function deleteFormFile(fileId: string): Promise<void> {
+  await request(`/forms/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+}
+
+/**
+ * Download a document as a Blob. The endpoint requires a Bearer token, so an
+ * `<iframe src>` cannot be used: the caller builds an Object URL instead.
+ */
+export async function downloadFormFile(fileId: string): Promise<Blob> {
+  const headers: Record<string, string> = { Accept: '*/*' };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 60000);
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE}/forms/files/${encodeURIComponent(fileId)}/download`,
+      { headers, signal: controller.signal },
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new NetworkError('انتهت مهلة تنزيل المستند. حاول مرة أخرى.');
+    }
+    throw new NetworkError();
+  } finally {
+    window.clearTimeout(timer);
+  }
+
+  if (!response.ok) throw await readErrorResponse(response);
+  return response.blob();
+}
+
+export interface FormTemplateQuery {
+  search?: string;
+  category?: string;
+}
+
+export async function fetchFormTemplates(query: FormTemplateQuery = {}): Promise<FormTemplate[]> {
+  const params = new URLSearchParams({ limit: '200', offset: '0' });
+  if (query.search?.trim()) params.set('search', query.search.trim());
+  if (query.category && query.category !== 'ALL') params.set('category', query.category);
+  const page = await request<PageDto<FormTemplateDto>>(`/forms/templates?${params.toString()}`);
+  return page.items.map(mapFormTemplate);
+}
+
+export async function createFormTemplate(payload: FormTemplateInput): Promise<FormTemplate> {
+  const dto = await request<FormTemplateDto>('/forms/templates', {
+    method: 'POST',
+    body: {
+      name: payload.name,
+      category: payload.category,
+      description: payload.description,
+      file_id: payload.fileId,
+      fields: payload.fields.map(fieldToDto),
+    },
+  });
+  return mapFormTemplate(dto);
+}
+
+export async function updateFormTemplate(
+  templateId: string,
+  payload: Partial<FormTemplateInput>,
+): Promise<FormTemplate> {
+  const body: Record<string, unknown> = {};
+  if (payload.name !== undefined) body.name = payload.name;
+  if (payload.category !== undefined) body.category = payload.category;
+  if (payload.description !== undefined) body.description = payload.description;
+  if (payload.fields !== undefined) body.fields = payload.fields.map(fieldToDto);
+  const dto = await request<FormTemplateDto>(`/forms/templates/${encodeURIComponent(templateId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return mapFormTemplate(dto);
+}
+
+export async function deleteFormTemplate(templateId: string): Promise<void> {
+  await request(`/forms/templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' });
+}
+
+export async function createFormSubmission(payload: {
+  templateId: string;
+  employeeId?: string | null;
+  values: Record<string, string | number>;
+  status?: 'مسودة' | 'نهائي';
+}): Promise<FormSubmission> {
+  const dto = await request<FormSubmissionDto>('/forms/submissions', {
+    method: 'POST',
+    body: {
+      template_id: payload.templateId,
+      employee_id: payload.employeeId || null,
+      values: payload.values,
+      status: payload.status || 'نهائي',
+    },
+  });
+  return mapFormSubmission(dto);
+}
+
+export async function fetchFormSubmissions(params: {
+  templateId?: string;
+  employeeId?: string;
+} = {}): Promise<FormSubmission[]> {
+  const rows = await fetchAllPages<FormSubmissionDto>('/forms/submissions', {
+    ...(params.templateId ? { template_id: params.templateId } : {}),
+    ...(params.employeeId ? { employee_id: params.employeeId } : {}),
+  });
+  return rows.map(mapFormSubmission);
 }

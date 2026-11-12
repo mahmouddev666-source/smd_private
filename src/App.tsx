@@ -42,7 +42,7 @@ import { LeaveAndBalances } from './components/LeaveAndBalances';
 import { PermitsAndMissions } from './components/PermitsAndMissions';
 import { ZKTecoManagerView } from './components/ZKTecoManagerView';
 import { DepartmentReports } from './components/DepartmentReports';
-import { SmartForms } from './components/SmartForms';
+import { FormsManager } from './components/FormsManager';
 import { ArchitectureAndDbView } from './components/ArchitectureAndDbView';
 import { LicensingManager } from './components/LicensingManager';
 import { BackupAndRestoreModal } from './components/BackupAndRestoreModal';
@@ -700,9 +700,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'forms' && (
-          <SmartForms employees={employees} leaveBalances={leaveBalances} initialEmployeeId={smartFormEmpId} />
-        )}
+        {activeTab === 'forms' && <FormsManager user={user} apiEnabled={mode === 'api'} />}
 
         {activeTab === 'architecture' && <ArchitectureAndDbView />}
 
