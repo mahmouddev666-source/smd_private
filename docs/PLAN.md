@@ -166,7 +166,7 @@
   - [x] `zkteco_devices`.
   - [ ] `departments`, `employee_documents` — المرحلة 4.
   - [ ] `shifts`, `holidays`, `settings` — المرحلة 6.
-  - [ ] `form_templates`, `form_fields`, `form_files`, `form_submissions` — المرحلة 4.
+  - [x] `form_templates`, `form_submissions`, `form_files` — المرحلة 4. (حقول القالب داخل `form_templates.fields` كـ JSONB بدل جدول منفصل)
 - [x] Alembic + ترحيل أولي `552fc48f8e7e_initial_schema.py` + قيود UNIQUE + فهارس + `alembic upgrade head` مُختبر.
 - [x] مصادقة: argon2 (`pwdlib`) + JWT Access + `get_current_user` + `require_role`. (Refresh/HttpOnly Cookie مؤجلة — الواجهة تستخدم Bearer حاليًا.)
 - [x] أدوار: `ADMIN`, `HR`, `SUPERVISOR`, `VIEWER` + `EDITOR_ROLES` على كل كتابة.
@@ -222,12 +222,15 @@ docker compose exec api python -m app.seed --profile demo
 **الهدف:** رفع مستندات الشركة كما هي، وعرضها، وتعبئتها ببيانات الموظف/المأمورية، وطباعتها.
 
 #### 4.1 الخادم
-- [ ] جدول `form_files`: `id`, `original_name`, `mime`, `size`, `storage_path`, `converted_pdf_path`, `page_count`, `checksum`.
-- [ ] رفع آمن: تحقق MIME من magic bytes + حد حجم 20MB + تنظيف الاسم + صلاحية.
-- [ ] تحويل `.docx/.doc/.xlsx/.xls` إلى PDF عبر LibreOffice داخل الحاوية.
-- [ ] استخراج عدد الصفحات وأبعادها.
-- [ ] Endpoints: `POST /forms/files`, `GET /forms/files/{id}`, `DELETE`, `POST /forms/templates`, `GET /forms/templates`, `PATCH`, `POST /forms/submissions`.
-- [ ] تخزين القوالب في DB (JSON للحقول) وليس في المتصفح.
+- [x] جدول `form_files`: `original_name`, `mime`, `kind`, `size_bytes`, `storage_path`, `converted_pdf_path`, `page_count`, `checksum` + `uploaded_by` و`is_active`.
+- [x] رفع آمن: تحقق MIME من magic bytes + حد حجم 20MB (`MAX_UPLOAD_MB`) + تنظيف الاسم + صلاحية المحرر.
+- [x] تحويل `.docx/.doc/.xlsx/.xls` إلى PDF عبر LibreOffice داخل الحاوية (`services/documents.py`).
+- [x] استخراج عدد الصفحات (بدون اعتماديات إضافية) — أبعاد الصفحات تُستنتج في الواجهة من نسبة العرض/الارتفاع.
+- [x] Endpoints: `POST /forms/files`, `GET /forms/files`, `GET /forms/files/{id}`, `GET /forms/files/{id}/download`, `DELETE`, `POST /forms/templates`, `GET /forms/templates`, `GET/PATCH/DELETE /forms/templates/{id}`, `POST /forms/submissions`, `GET /forms/submissions`.
+- [x] تخزين القوالب في DB (JSONB للحقول) وليس في المتصفح، مع التحقق من الحدود (0–100%) وتكرار المفاتيح.
+- [x] حذف منطقي للملفات والقوالب + منع حذف ملف مرتبط بقالب نشط.
+- [x] Migration `a6095e343c3b_form_engine.py` مُختبرة صعودًا وهبوطًا.
+- [x] اختبارات: **9 اختبارات جديدة** (رفع PDF، رفض التزوير/الحجم، تحويل DOCX، حدود الحقول، الصلاحيات، منع الحذف، Submissions) → **35/35 pytest**.
 
 #### 4.2 الواجهة
 - [ ] شاشة "مكتبة النماذج": رفع بالسحب والإفلات + بحث + تصنيف + معاينة مصغّرة.

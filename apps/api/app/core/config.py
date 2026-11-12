@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Demo data
     demo_mode: bool = True
 
+    # Document engine (company forms)
+    storage_dir: str = "./storage"
+    max_upload_mb: int = 20
+    libreoffice_bin: str = "soffice"
+    libreoffice_timeout_seconds: int = 120
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

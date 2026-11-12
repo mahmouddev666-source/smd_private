@@ -71,8 +71,16 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 cd apps/api
-pytest                 # 26 اختبارًا على SQLite in-memory
+pytest                 # 35 اختبارًا على SQLite in-memory
 ```
+
+## محرك المستندات
+
+- المستند الأصلي يُخزَّن كما هو تحت `STORAGE_DIR/forms/` (خارج مجلد الويب) ولا يُقدَّم إلا عبر `GET /api/forms/files/{id}/download` بعد التحقق من الجلسة.
+- Word/Excel يُحوَّل إلى PDF عبر LibreOffice Headless (`LIBREOFFICE_BIN`) وتُحفظ نسخة PDF بجانبه.
+- التحقق من النوع عبر **magic bytes** لا الامتداد، والحد الأقصى `MAX_UPLOAD_MB` (افتراضي 20).
+- حقول القالب تُخزَّن كإحداثيات نسبية `%` + رقم الصفحة + `binding` (مثل `employee.name` أو `leave.startDate`)، ولا يُعاد رسم المستند إطلاقًا.
+- الحذف منطقي (`is_active=false`)، ويُمنع حذف ملف مرتبط بقالب نشط (`FORM_FILE_IN_USE`).
 
 ## الترحيلات
 
@@ -99,6 +107,13 @@ alembic downgrade -1                                  # تراجع خطوة
 | `GET/POST /api/permits` | الأذونات |
 | `GET/POST /api/missions` | المأموريات |
 | `GET/POST /api/devices` | أجهزة ZKTeco |
+| `POST /api/forms/files` | رفع مستند شركة (PDF/Word/Excel/صورة، حد 20MB) |
+| `GET /api/forms/files` | مكتبة المستندات المرفوعة |
+| `GET /api/forms/files/{id}/download` | معاينة/تنزيل المستند (يتطلب تسجيل الدخول) |
+| `DELETE /api/forms/files/{id}` | حذف منطقي (يُرفض إذا كان مرتبطًا بقالب نشط) |
+| `GET/POST /api/forms/templates` | قوالب النماذج + حقولها (إحداثيات نسبية) |
+| `GET/PATCH/DELETE /api/forms/templates/{id}` | قراءة/تعديل/تعطيل قالب |
+| `GET/POST /api/forms/submissions` | النماذج المعبأة والمحفوظة |
 
 توثيق تفاعلي: `http://localhost/api/docs` (عبر nginx) أو `http://localhost:8000/api/docs`.
 

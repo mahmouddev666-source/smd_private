@@ -24,6 +24,7 @@ venv/
 
 # Local data
 uploads/
+storage/
 backups/
 *.db
 *.sqlite
