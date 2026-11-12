@@ -71,3 +71,21 @@ def test_rejected_leave_does_not_deduct(client: TestClient) -> None:
     rejected = client.post(f"/api/leaves/{leave_id}/decision", json={"status": "مرفوض"}, headers=headers)
     assert rejected.status_code == 200
     assert rejected.json()["status"] == "مرفوض"
+
+
+def test_balances_are_created_and_deducted_after_approval(client: TestClient) -> None:
+    headers = login(client)
+    _create_employee(client, headers)
+    leave_id = client.post("/api/leaves", json=LEAVE, headers=headers).json()["id"]
+    client.post(f"/api/leaves/{leave_id}/decision", json={"status": "معتمد"}, headers=headers)
+
+    response = client.get("/api/leave-balances", params={"employee_id": "9003"}, headers=headers)
+    assert response.status_code == 200, response.text
+    balances = response.json()
+    assert len(balances) == 1
+    assert balances[0]["annual_used"] == 5
+    assert balances[0]["annual_total"] == 21
+
+
+def test_balances_require_authentication(client: TestClient) -> None:
+    assert client.get("/api/leave-balances").status_code == 401

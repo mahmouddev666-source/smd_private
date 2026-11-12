@@ -31,8 +31,10 @@ interface ZKTecoManagerViewProps {
   biometricLogs: BiometricLogEntry[];
   employees: Employee[];
   user: UserSession;
-  onUpdateDevice: (dev: ZKTecoDevice) => void;
+  onUpdateDevice: (dev: ZKTecoDevice) => Promise<void>;
   onSyncDeviceLogs: (deviceId: string) => void;
+  /** False while the server-side ZKTeco connector is not deployed (phase 5). */
+  syncEnabled?: boolean;
 }
 
 export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
@@ -41,7 +43,8 @@ export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
   employees,
   user,
   onUpdateDevice,
-  onSyncDeviceLogs
+  onSyncDeviceLogs,
+  syncEnabled = true
 }) => {
   const [testingDeviceId, setTestingDeviceId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ [key: string]: string }>({});
@@ -117,6 +120,17 @@ export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
         </div>
       </div>
 
+      {!syncEnabled && (
+        <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+          <span className="leading-relaxed">
+            استيراد الحركات من أجهزة ZKTeco يعمل عبر خدمة <code className="font-mono">services/connector</code>{' '}
+            على الخادم (المرحلة 5) ولم تُفعّل بعد. الأجهزة أدناه مسجّلة في قاعدة البيانات، لكن
+            «اختبار الاتصال» و«سحب الحركات» معطّلان حتى يتم تشغيل الخدمة. لا يتصل المتصفح بالجهاز مباشرة.
+          </span>
+        </div>
+      )}
+
       {syncFeedback && (
         <div className="p-4 bg-emerald-950/80 border border-emerald-600 rounded-xl text-emerald-200 text-xs flex items-center gap-2.5 shadow-sm">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
@@ -180,8 +194,8 @@ export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
             <div className="flex items-center gap-3 pt-2">
               <button
                 onClick={() => handleTestConnection(dev)}
-                disabled={testingDeviceId === dev.id}
-                className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                disabled={testingDeviceId === dev.id || !syncEnabled}
+                className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Wifi className="w-3.5 h-3.5" />
                 <span>{testingDeviceId === dev.id ? 'جاري الفحص...' : 'اختبار اتصال TCP'}</span>
@@ -189,8 +203,8 @@ export const ZKTecoManagerView: React.FC<ZKTecoManagerViewProps> = ({
 
               <button
                 onClick={() => handleSyncPunches(dev)}
-                disabled={isSyncing}
-                className="flex-1 py-2 px-3 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                disabled={isSyncing || !syncEnabled}
+                className="flex-1 py-2 px-3 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                 <span>{isSyncing ? 'جاري السحب...' : 'سحب الحركات الآن'}</span>

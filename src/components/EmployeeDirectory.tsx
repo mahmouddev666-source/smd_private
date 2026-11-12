@@ -35,13 +35,14 @@ import {
 import { exportEmployeesToExcel, parseExcelFile } from '../utils/fileExport';
 import { PhotoImportModal } from './PhotoImportModal';
 import { localDateISO } from '../utils/dateUtils';
+import { canEdit } from '../utils/roles';
 
 interface EmployeeDirectoryProps {
   employees: Employee[];
   user: UserSession;
-  onAddEmployee: (emp: Omit<Employee, 'serial'>) => void;
-  onUpdateEmployee: (emp: Employee) => void;
-  onDeleteEmployee: (employeeId: string) => void;
+  onAddEmployee: (emp: Omit<Employee, 'serial'>) => Promise<void>;
+  onUpdateEmployee: (emp: Employee) => Promise<void>;
+  onDeleteEmployee: (employeeId: string) => Promise<void>;
   onSelectEmployee: (employeeId: string) => void;
 }
 
@@ -79,8 +80,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const [selectedDept, setSelectedDept] = useState<string>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Employee | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const canEdit = user.role === 'ADMIN' || user.role === 'HR';
+  const userCanEdit = canEdit(user.role);
 
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add');
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
@@ -122,9 +125,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     return matchesSearch && matchesDept;
   });
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    if (saving) return;
     const employeeId = formData.employeeId.trim();
     const nationalId = formData.nationalId.trim();
 
@@ -159,6 +163,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       nationalId,
     };
 
+    setSaving(true);
     try {
       if (modalMode === 'edit' && editingEmployeeId) {
         const original = employees.find((employee) => employee.employeeId === editingEmployeeId);
@@ -166,57 +171,71 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           setFormError('لم يتم العثور على الموظف المطلوب تعديله.');
           return;
         }
-        onUpdateEmployee({ ...payload, serial: original.serial, isDemo: original.isDemo });
+        await onUpdateEmployee({ ...payload, serial: original.serial, isDemo: original.isDemo });
       } else {
-        onAddEmployee(payload);
+        await onAddEmployee(payload);
       }
       closeModal();
       setFormData(createEmptyEmployeeForm());
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'تعذر حفظ بيانات الموظف.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleToggleActive = (employee: Employee) => {
-    onUpdateEmployee({ ...employee, isActive: !employee.isActive });
+  const handleToggleActive = async (employee: Employee) => {
+    setActionError(null);
+    try {
+      await onUpdateEmployee({ ...employee, isActive: !employee.isActive });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'تعذر تحديث حالة الموظف.');
+    }
   };
 
   const handleDelete = (employee: Employee) => {
     setPendingDelete(employee);
   };
 
-  const confirmDelete = () => {
-    if (!pendingDelete) return;
-    onDeleteEmployee(pendingDelete.employeeId);
-    setPendingDelete(null);
+  const confirmDelete = async () => {
+    if (!pendingDelete) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await onDeleteEmployee(pendingDelete.employeeId);
+      setPendingDelete(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'تعذر حذف الموظف.');
+    }
   };
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
   const excelInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  const importEmployeeSafely = (
+  const importEmployeeSafely = async (
     payload: Omit<Employee, 'serial'>,
     seenIds: Set<string>,
-  ): boolean => {
+  ): Promise<boolean> => {
     const code = payload.employeeId.trim();
     if (!code || seenIds.has(code) || employees.some((employee) => employee.employeeId === code)) {
       return false;
     }
     seenIds.add(code);
     try {
-      onAddEmployee(payload);
+      await onAddEmployee(payload);
       return true;
     } catch {
       return false;
     }
   };
 
-  const handlePhotoImport = (rows: any[]) => {
+  const handlePhotoImport = async (rows: any[]) => {
     const seenIds = new Set<string>();
     let added = 0;
-    rows.forEach(r => {
-      const ok = importEmployeeSafely({
+    for (const r of rows) {
+      const ok = await importEmployeeSafely({
         employeeId: String(r.employeeId || `90${Math.floor(10 + Math.random() * 89)}`),
         name: r.name || 'موظف مستورد',
         mobile: r.mobile || '01000000000',
@@ -237,7 +256,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         isDemo: true,
       }, seenIds);
       if (ok) added += 1;
-    });
+    }
     setImportSuccessMsg(
       `تم استيراد ${added} موظف بنجاح من المستند المصور` +
       (added < rows.length ? ` — تم تجاهل ${rows.length - added} صف مكرر أو غير صالح.` : '.'),
@@ -256,11 +275,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       }
       const seenIds = new Set<string>();
       let addedCount = 0;
-      rows.forEach((r: any) => {
+      for (const r of rows as any[]) {
         const name = r['الاسم بالكامل'] || r['الاسم'] || r['Name'] || r['name'];
         const empId = String(r['كود الموظف'] || r['الكود'] || r['ID'] || r['id'] || `90${Math.floor(10 + Math.random() * 89)}`);
-        if (!name) return;
-        const ok = importEmployeeSafely({
+        if (!name) continue;
+        const ok = await importEmployeeSafely({
           employeeId: empId,
           name: String(name),
           mobile: String(r['رقم المحمول'] || r['المحمول'] || r['Mobile'] || '01000000000'),
@@ -281,7 +300,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           isDemo: true,
         }, seenIds);
         if (ok) addedCount += 1;
-      });
+      }
       setImportSuccessMsg(
         `تم استيراد ${addedCount} موظف بنجاح من ملف Excel` +
         (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف مكرر أو غير صالح.` : '.'),
@@ -320,7 +339,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           
           {/* CAMERA / PHOTO IMPORT BUTTON */}
-          {canEdit && (
+          {userCanEdit && (
           <button
             onClick={() => setShowPhotoModal(true)}
             className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -332,7 +351,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           )}
 
           {/* EXCEL IMPORT BUTTON */}
-          {canEdit && (
+          {userCanEdit && (
           <button
             onClick={() => excelInputRef.current?.click()}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -354,7 +373,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           </button>
 
           {/* ADD EMPLOYEE BUTTON (AVAILABLE FOR USER) */}
-          {canEdit && (
+          {userCanEdit && (
           <button
             onClick={openAddModal}
             className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -370,6 +389,16 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-xl flex items-center gap-2 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span className="font-semibold">{importSuccessMsg}</span>
+        </div>
+      )}
+
+      {actionError && (
+        <div role="alert" className="p-3.5 bg-rose-50 border border-rose-300 text-rose-800 text-xs rounded-xl flex items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="font-semibold">{actionError}</span>
+          </div>
+          <button onClick={() => setActionError(null)} className="font-bold" aria-label="إغلاق">✕</button>
         </div>
       )}
 
@@ -511,7 +540,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        {canEdit && (
+                        {userCanEdit && (
                           <>
                             <button
                               onClick={() => openEditModal(emp)}
@@ -778,9 +807,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
+                  disabled={saving}
+                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer disabled:cursor-wait"
                 >
-                  {modalMode === 'edit' ? 'حفظ التعديلات' : 'حفظ وتسجيل الموظف'}
+                  {saving
+                    ? 'جارٍ الحفظ...'
+                    : modalMode === 'edit'
+                      ? 'حفظ التعديلات'
+                      : 'حفظ وتسجيل الموظف'}
                 </button>
               </div>
             </form>

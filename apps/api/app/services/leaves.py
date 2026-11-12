@@ -65,6 +65,20 @@ def list_leaves(
     return list(rows), total
 
 
+def list_balances(
+    db: Session,
+    *,
+    employee_id: str | None = None,
+    year: int | None = None,
+) -> list[LeaveBalance]:
+    stmt = select(LeaveBalance)
+    if employee_id:
+        stmt = stmt.where(LeaveBalance.employee_id == employee_id)
+    if year:
+        stmt = stmt.where(LeaveBalance.year == year)
+    return list(db.scalars(stmt.order_by(LeaveBalance.employee_id)).all())
+
+
 def create_leave(db: Session, payload: LeaveCreate, actor: User) -> Leave:
     _ensure_employee(db, payload.employee_id)
 

@@ -71,7 +71,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 cd apps/api
-pytest                 # 24 اختبارًا على SQLite in-memory
+pytest                 # 26 اختبارًا على SQLite in-memory
 ```
 
 ## الترحيلات
@@ -94,6 +94,7 @@ alembic downgrade -1                                  # تراجع خطوة
 | `GET/PATCH/DELETE /api/employees/{employee_id}` | قراءة/تعديل/تعطيل موظف |
 | `GET/POST /api/attendance` | سجلات الحضور (upsert يومي) |
 | `GET/POST /api/leaves` | الإجازات |
+| `GET /api/leave-balances` | أرصدة الإجازات للمستخدم الحالي |
 | `POST /api/leaves/{id}/decision` | اعتماد/رفض إجازة |
 | `GET/POST /api/permits` | الأذونات |
 | `GET/POST /api/missions` | المأموريات |

@@ -29,14 +29,15 @@ import {
 import { PhotoImportModal } from './PhotoImportModal';
 import { parseExcelFile, exportPermitsToExcel, exportMissionsToExcel } from '../utils/fileExport';
 import { localDateISO } from '../utils/dateUtils';
+import { canEdit } from '../utils/roles';
 
 interface PermitsAndMissionsProps {
   permits: PermitRecord[];
   missions: MissionRecord[];
   employees: Employee[];
   user: UserSession;
-  onAddPermit: (permit: Omit<PermitRecord, 'id'>) => void;
-  onAddMission: (mission: Omit<MissionRecord, 'id'>) => void;
+  onAddPermit: (permit: Omit<PermitRecord, 'id'>) => Promise<void>;
+  onAddMission: (mission: Omit<MissionRecord, 'id'>) => Promise<void>;
   onSelectEmployee: (employeeId: string) => void;
 }
 
@@ -55,6 +56,11 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
+  const [permitSaving, setPermitSaving] = useState(false);
+  const [missionSaving, setMissionSaving] = useState(false);
+  const [permitError, setPermitError] = useState<string | null>(null);
+  const [missionError, setMissionError] = useState<string | null>(null);
+  const userCanEdit = canEdit(user.role);
 
   const excelFileRef = useRef<HTMLInputElement | null>(null);
 
@@ -80,95 +86,129 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
 
   const empMap = new Map(employees.map(e => [e.employeeId, e]));
 
-  const handlePermitSubmit = (e: React.FormEvent) => {
+  const handlePermitSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAddPermit({
-      employeeId: pEmpId,
-      permitType: pType,
-      date: pDate,
-      startTime: pStart,
-      endTime: pEnd,
-      durationHours: Number(pDuration),
-      reason: pReason,
-      status: 'معتمد',
-      approvedBy: user.name
-    });
-    setShowAddPermitModal(false);
-    setPReason('');
+    setPermitError(null);
+    if (permitSaving) return;
+    if (!pEmpId) {
+      setPermitError('يرجى اختيار الموظف.');
+      return;
+    }
+    setPermitSaving(true);
+    try {
+      await onAddPermit({
+        employeeId: pEmpId,
+        permitType: pType,
+        date: pDate,
+        startTime: pStart,
+        endTime: pEnd,
+        durationHours: Number(pDuration),
+        reason: pReason,
+        status: 'معتمد',
+        approvedBy: user.name
+      });
+      setShowAddPermitModal(false);
+      setPReason('');
+    } catch (error) {
+      setPermitError(error instanceof Error ? error.message : 'تعذر حفظ الإذن.');
+    } finally {
+      setPermitSaving(false);
+    }
   };
 
-  const handleMissionSubmit = (e: React.FormEvent) => {
+  const handleMissionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setMissionError(null);
+    if (missionSaving) return;
+    if (!mEmpId || !mDestination.trim()) {
+      setMissionError('يرجى اختيار الموظف وتحديد الجهة أو الموقع.');
+      return;
+    }
     const total = mType === 'مأمورية ببدل' ? mDays * mAllowancePerDay : 0;
-    onAddMission({
-      employeeId: mEmpId,
-      missionType: mType,
-      destination: mDestination,
-      purpose: mPurpose,
-      startDate: mStart,
-      endDate: mEnd,
-      daysCount: Number(mDays),
-      allowancePerDay: mType === 'مأمورية ببدل' ? mAllowancePerDay : 0,
-      totalAllowance: total,
-      transportationType: mTransport,
-      status: 'معتمد',
-      approvedBy: user.name
-    });
-    setShowAddMissionModal(false);
-    setMDestination('');
-    setMPurpose('');
+    setMissionSaving(true);
+    try {
+      await onAddMission({
+        employeeId: mEmpId,
+        missionType: mType,
+        destination: mDestination,
+        purpose: mPurpose,
+        startDate: mStart,
+        endDate: mEnd,
+        daysCount: Number(mDays),
+        allowancePerDay: mType === 'مأمورية ببدل' ? mAllowancePerDay : 0,
+        totalAllowance: total,
+        transportationType: mTransport,
+        status: 'معتمد',
+        approvedBy: user.name
+      });
+      setShowAddMissionModal(false);
+      setMDestination('');
+      setMPurpose('');
+    } catch (error) {
+      setMissionError(error instanceof Error ? error.message : 'تعذر حفظ المأمورية.');
+    } finally {
+      setMissionSaving(false);
+    }
   };
 
-  const handlePhotoImport = (rows: any[]) => {
+  const handlePhotoImport = async (rows: any[]) => {
     setImportErrorMsg(null);
     const fallbackEmployeeId = employees[0]?.employeeId || '';
     const knownEmployeeIds = new Set(employees.map(emp => emp.employeeId));
     if (activeTab === 'permits') {
       let count = 0;
-      rows.forEach(r => {
+      for (const r of rows) {
         const empId = String(r.employeeId || fallbackEmployeeId);
-        if (!knownEmployeeIds.has(empId)) return;
-        onAddPermit({
-          employeeId: empId,
-          permitType: r.permitType || 'إذن شخصي',
-          date: r.date || localDateISO(),
-          startTime: r.startTime || '10:00',
-          endTime: r.endTime || '12:00',
-          durationHours: Number(r.durationHours) || 2,
-          reason: r.reason || 'إذن مصور ومستخرج ضوئياً',
-          status: 'معتمد',
-          approvedBy: user.name
-        });
-        count++;
-      });
+        if (!knownEmployeeIds.has(empId)) continue;
+        try {
+          await onAddPermit({
+            employeeId: empId,
+            permitType: r.permitType || 'إذن شخصي',
+            date: r.date || localDateISO(),
+            startTime: r.startTime || '10:00',
+            endTime: r.endTime || '12:00',
+            durationHours: Number(r.durationHours) || 2,
+            reason: r.reason || 'إذن مصور ومستخرج ضوئياً',
+            status: 'معتمد',
+            approvedBy: user.name
+          });
+          count++;
+        } catch {
+          // Skip rows the server rejects.
+        }
+      }
       setImportNotice(
         `تم استيراد ${count} تصريح / إذن بنجاح عبر الكاميرا والمسح الضوئي.` +
-        (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+        (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل أو غير صالح.` : '')
       );
     } else {
       let count = 0;
-      rows.forEach(r => {
+      for (const r of rows) {
         const empId = String(r.employeeId || fallbackEmployeeId);
-        if (!knownEmployeeIds.has(empId)) return;
-        onAddMission({
-          employeeId: empId,
-          missionType: r.missionType || 'مأمورية ببدل',
-          destination: r.destination || 'موقع الشركة',
-          purpose: r.purpose || 'مأمورية مستخرجة ضوئياً',
-          startDate: r.startDate || localDateISO(),
-          endDate: r.endDate || localDateISO(),
-          daysCount: Number(r.daysCount) || 1,
-          allowancePerDay: Number(r.allowancePerDay) || 450,
-          totalAllowance: Number(r.totalAllowance) || (Number(r.daysCount || 1) * 450),
-          transportationType: r.transportationType || 'سيارة الشركة',
-          status: 'معتمد',
-          approvedBy: user.name
-        });
-        count++;
-      });
+        if (!knownEmployeeIds.has(empId)) continue;
+        try {
+          await onAddMission({
+            employeeId: empId,
+            missionType: r.missionType || 'مأمورية ببدل',
+            destination: r.destination || 'موقع الشركة',
+            purpose: r.purpose || 'مأمورية مستخرجة ضوئياً',
+            startDate: r.startDate || localDateISO(),
+            endDate: r.endDate || localDateISO(),
+            daysCount: Number(r.daysCount) || 1,
+            allowancePerDay: Number(r.allowancePerDay) || 450,
+            totalAllowance: Number(r.totalAllowance) || (Number(r.daysCount || 1) * 450),
+            transportationType: r.transportationType || 'سيارة الشركة',
+            status: 'معتمد',
+            approvedBy: user.name
+          });
+          count++;
+        } catch {
+          // Skip rows the server rejects.
+        }
+      }
       setImportNotice(
         `تم استيراد ${count} أمر مأمورية بنجاح عبر الكاميرا والمسح الضوئي.` +
-        (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+        (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل أو غير صالح.` : '')
       );
     }
     setTimeout(() => setImportNotice(null), 5000);
@@ -190,52 +230,60 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
       }
       if (activeTab === 'permits') {
         let count = 0;
-        rows.forEach((r: any) => {
+        for (const r of rows as any[]) {
           const empId = String(r['كود الموظف'] || r.employeeId || fallbackEmployeeId);
-          if (!knownEmployeeIds.has(empId)) return;
-          onAddPermit({
-            employeeId: empId,
-            permitType: (r['نوع الإذن'] || r.permitType || 'إذن شخصي') as PermitType,
-            date: String(r['التاريخ'] || r.date || localDateISO()),
-            startTime: String(r['من الساعة'] || r.startTime || '09:00'),
-            endTime: String(r['إلى الساعة'] || r.endTime || '11:00'),
-            durationHours: Number(r['المدة (ساعات)'] || r.durationHours || 2),
-            reason: String(r['السبب'] || r.reason || 'مستورد من ملف Excel'),
-            status: 'معتمد',
-            approvedBy: user.name
-          });
-          count++;
-        });
+          if (!knownEmployeeIds.has(empId)) continue;
+          try {
+            await onAddPermit({
+              employeeId: empId,
+              permitType: (r['نوع الإذن'] || r.permitType || 'إذن شخصي') as PermitType,
+              date: String(r['التاريخ'] || r.date || localDateISO()),
+              startTime: String(r['من الساعة'] || r.startTime || '09:00'),
+              endTime: String(r['إلى الساعة'] || r.endTime || '11:00'),
+              durationHours: Number(r['المدة (ساعات)'] || r.durationHours || 2),
+              reason: String(r['السبب'] || r.reason || 'مستورد من ملف Excel'),
+              status: 'معتمد',
+              approvedBy: user.name
+            });
+            count++;
+          } catch {
+            // Skip rows the server rejects.
+          }
+        }
         setImportNotice(
           `تم استيراد ${count} إذن وتصريح خروج من ملف Excel بنجاح.` +
-          (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+          (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل أو غير صالح.` : '')
         );
       } else {
         let count = 0;
-        rows.forEach((r: any) => {
+        for (const r of rows as any[]) {
           const empId = String(r['كود الموظف'] || r.employeeId || fallbackEmployeeId);
-          if (!knownEmployeeIds.has(empId)) return;
+          if (!knownEmployeeIds.has(empId)) continue;
           const days = Number(r['عدد الأيام'] || r.daysCount || 1);
           const perDay = Number(r['البدل اليومي'] || r.allowancePerDay || 450);
-          onAddMission({
-            employeeId: empId,
-            missionType: (r['نوع المأمورية'] || r.missionType || 'مأمورية ببدل') as MissionType,
-            destination: String(r['الجهة والموقع'] || r.destination || 'موقع السويس'),
-            purpose: String(r['الغرض من التكليف'] || r.purpose || 'مستورد من ملف Excel'),
-            startDate: String(r['تاريخ البدء'] || r.startDate || localDateISO()),
-            endDate: String(r['تاريخ العودة'] || r.endDate || localDateISO()),
-            daysCount: days,
-            allowancePerDay: perDay,
-            totalAllowance: Number(r['إجمالي البدل (ج.م)'] || r.totalAllowance || (days * perDay)),
-            transportationType: (r['وسيلة الانتقال'] || r.transportationType || 'سيارة الشركة') as any,
-            status: 'معتمد',
-            approvedBy: user.name
-          });
-          count++;
-        });
+          try {
+            await onAddMission({
+              employeeId: empId,
+              missionType: (r['نوع المأمورية'] || r.missionType || 'مأمورية ببدل') as MissionType,
+              destination: String(r['الجهة والموقع'] || r.destination || 'موقع السويس'),
+              purpose: String(r['الغرض من التكليف'] || r.purpose || 'مستورد من ملف Excel'),
+              startDate: String(r['تاريخ البدء'] || r.startDate || localDateISO()),
+              endDate: String(r['تاريخ العودة'] || r.endDate || localDateISO()),
+              daysCount: days,
+              allowancePerDay: perDay,
+              totalAllowance: Number(r['إجمالي البدل (ج.م)'] || r.totalAllowance || (days * perDay)),
+              transportationType: (r['وسيلة الانتقال'] || r.transportationType || 'سيارة الشركة') as any,
+              status: 'معتمد',
+              approvedBy: user.name
+            });
+            count++;
+          } catch {
+            // Skip rows the server rejects.
+          }
+        }
         setImportNotice(
           `تم استيراد ${count} مأمورية رسمية من ملف Excel بنجاح.` +
-          (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل.` : '')
+          (count < rows.length ? ` — تم تجاهل ${rows.length - count} صف لموظف غير مسجل أو غير صالح.` : '')
         );
       }
       setTimeout(() => setImportNotice(null), 5000);
@@ -301,24 +349,28 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Universal Import by Photo / Camera */}
-          <button
-            onClick={() => setShowPhotoModal(true)}
-            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
-            title="استيراد وتصوير مستند الإذن أو المأمورية بالكاميرا"
-          >
-            <Camera className="w-4 h-4 text-cyan-400" />
-            <span>استيراد وتصوير ({activeTab === 'permits' ? 'إذن' : 'مأمورية'})</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => setShowPhotoModal(true)}
+              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+              title="استيراد وتصوير مستند الإذن أو المأمورية بالكاميرا"
+            >
+              <Camera className="w-4 h-4 text-cyan-400" />
+              <span>استيراد وتصوير ({activeTab === 'permits' ? 'إذن' : 'مأمورية'})</span>
+            </button>
+          )}
 
           {/* Import Excel */}
-          <button
-            onClick={() => excelFileRef.current?.click()}
-            className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
-            title="استيراد ملف Excel أو CSV"
-          >
-            <Upload className="w-3.5 h-3.5 text-blue-600" />
-            <span>استيراد Excel</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => excelFileRef.current?.click()}
+              className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+              title="استيراد ملف Excel أو CSV"
+            >
+              <Upload className="w-3.5 h-3.5 text-blue-600" />
+              <span>استيراد Excel</span>
+            </button>
+          )}
 
           {/* Export Excel */}
           <button
@@ -330,11 +382,11 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
             <span>تصدير Excel</span>
           </button>
 
-          {user.role !== 'VIEWER' && (
+          {userCanEdit && (
             <>
               {activeTab === 'permits' ? (
                 <button
-                  onClick={() => setShowAddPermitModal(true)}
+                  onClick={() => { setPermitError(null); setShowAddPermitModal(true); }}
                   className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -342,7 +394,7 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
                 </button>
               ) : (
                 <button
-                  onClick={() => setShowAddMissionModal(true)}
+                  onClick={() => { setMissionError(null); setShowAddMissionModal(true); }}
                   className="px-3.5 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -515,10 +567,15 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
       {/* Add Permit Modal */}
       {showAddPermitModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="permit-modal-title"
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl"
+          >
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
-              <h3 className="text-sm font-bold text-slate-900">إصدار تصريح خروج / إذن عمل</h3>
-              <button onClick={() => setShowAddPermitModal(false)} className="text-slate-400 font-bold">✕</button>
+              <h3 id="permit-modal-title" className="text-sm font-bold text-slate-900">إصدار تصريح خروج / إذن عمل</h3>
+              <button onClick={() => { setShowAddPermitModal(false); setPermitError(null); }} className="text-slate-400 font-bold" aria-label="إغلاق">✕</button>
             </div>
             <form onSubmit={handlePermitSubmit} className="space-y-4">
               <div>
@@ -602,9 +659,21 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs"
                 />
               </div>
+              {permitError && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-[11px] text-rose-800 leading-relaxed flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{permitError}</span>
+                </div>
+              )}
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
-                <button type="button" onClick={() => setShowAddPermitModal(false)} className="px-4 py-2 bg-slate-100 rounded-lg text-xs">إلغاء</button>
-                <button type="submit" className="px-5 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold">اعتماد الإذن</button>
+                <button type="button" onClick={() => { setShowAddPermitModal(false); setPermitError(null); }} className="px-4 py-2 bg-slate-100 rounded-lg text-xs">إلغاء</button>
+                <button
+                  type="submit"
+                  disabled={permitSaving}
+                  className="px-5 py-2 bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-xs font-bold cursor-pointer disabled:cursor-wait"
+                >
+                  {permitSaving ? 'جارٍ الاعتماد...' : 'اعتماد الإذن'}
+                </button>
               </div>
             </form>
           </div>
@@ -614,10 +683,15 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
       {/* Add Mission Modal */}
       {showAddMissionModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mission-modal-title"
+            className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl"
+          >
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
-              <h3 className="text-sm font-bold text-slate-900">إصدار أمر تكليف بمأمورية عمل</h3>
-              <button onClick={() => setShowAddMissionModal(false)} className="text-slate-400 font-bold">✕</button>
+              <h3 id="mission-modal-title" className="text-sm font-bold text-slate-900">إصدار أمر تكليف بمأمورية عمل</h3>
+              <button onClick={() => { setShowAddMissionModal(false); setMissionError(null); }} className="text-slate-400 font-bold" aria-label="إغلاق">✕</button>
             </div>
             <form onSubmit={handleMissionSubmit} className="space-y-4">
               <div>
@@ -733,9 +807,21 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
                   </div>
                 </div>
               )}
+              {missionError && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-[11px] text-rose-800 leading-relaxed flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{missionError}</span>
+                </div>
+              )}
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
-                <button type="button" onClick={() => setShowAddMissionModal(false)} className="px-4 py-2 bg-slate-100 rounded-lg text-xs">إلغاء</button>
-                <button type="submit" className="px-5 py-2 bg-amber-700 text-white rounded-lg text-xs font-bold">اعتماد التكليف</button>
+                <button type="button" onClick={() => { setShowAddMissionModal(false); setMissionError(null); }} className="px-4 py-2 bg-slate-100 rounded-lg text-xs">إلغاء</button>
+                <button
+                  type="submit"
+                  disabled={missionSaving}
+                  className="px-5 py-2 bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-xs font-bold cursor-pointer disabled:cursor-wait"
+                >
+                  {missionSaving ? 'جارٍ الاعتماد...' : 'اعتماد التكليف'}
+                </button>
               </div>
             </form>
           </div>

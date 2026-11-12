@@ -18,6 +18,10 @@ COPY src ./src
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
+# Production images never fall back to the browser-side demo dataset.
+ARG VITE_ALLOW_OFFLINE_DEMO=false
+ENV VITE_ALLOW_OFFLINE_DEMO=$VITE_ALLOW_OFFLINE_DEMO
+
 RUN npm run build
 
 FROM nginx:1.27-alpine AS runtime

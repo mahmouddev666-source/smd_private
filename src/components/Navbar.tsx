@@ -43,6 +43,9 @@ interface NavbarProps {
   onLockNow: () => void;
   isTimeLocked: boolean;
   onOpenBackupModal: () => void;
+  /** Local backup/restore and the demo time-lock are hidden when using the API. */
+  showBackupButton?: boolean;
+  showLicensingButton?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -52,7 +55,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   onLockNow,
   isTimeLocked,
-  onOpenBackupModal
+  onOpenBackupModal,
+  showBackupButton = true,
+  showLicensingButton = true
 }) => {
   const navItems: { id: ActiveTab; label: string; icon: React.ElementType }[] = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
@@ -117,15 +122,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Zone 3: Primary Action & Session Controls */}
           <div className="flex items-center gap-2.5 shrink-0">
-            {/* Universal Backup & Restore trigger */}
-            <button
-              onClick={onOpenBackupModal}
-              title="مركز استرداد وتصدير ملفات وبيانات المنظومة"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors shadow-xs cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-cyan-300" />
-              <span className="hidden sm:inline whitespace-nowrap">استرداد وتصدير الملفات</span>
-            </button>
+            {/* Universal Backup & Restore trigger (demo mode only) */}
+            {showBackupButton && (
+              <button
+                onClick={onOpenBackupModal}
+                title="مركز استرداد وتصدير ملفات وبيانات المنظومة"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors shadow-xs cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5 text-cyan-300" />
+                <span className="hidden sm:inline whitespace-nowrap">استرداد وتصدير الملفات</span>
+              </button>
+            )}
 
             {/* Role indicator */}
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/80 rounded-lg text-blue-900 text-xs font-bold border border-blue-200">
@@ -143,8 +150,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
 
-            {/* Quick Licensing / Time-Lock trigger for Admin */}
-            {user.role === 'ADMIN' && (
+            {/* Quick Licensing / Time-Lock trigger for Admin (demo mode only) */}
+            {showLicensingButton && user.role === 'ADMIN' && (
               <button
                 onClick={() => onTabChange('licensing')}
                 title="إدارة ترخيص وقفل النظام (Time-Lock)"

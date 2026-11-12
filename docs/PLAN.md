@@ -172,7 +172,7 @@
 - [x] أدوار: `ADMIN`, `HR`, `SUPERVISOR`, `VIEWER` + `EDITOR_ROLES` على كل كتابة.
 - [x] `audit_logs` لكل عملية كتابة (من، ماذا، قبل/بعد، متى).
 - [x] معالجة أخطاء موحدة `{detail, code}` + تحقق Pydantic + `errors[]` لأخطاء الحقول.
-- [x] OpenAPI + **24/24 اختبار `pytest`** (صحة، مصادقة، موظفون، حضور، إجازات، أذونات/مأموريات).
+- [x] OpenAPI + **26/26 اختبار `pytest`** (صحة، مصادقة، موظفون، حضور، إجازات، أرصدة، أذونات/مأموريات).
 - [x] `seed.py` تجريبي: 3 مستخدمين + 18 موظفًا `9001`–`9018` + أرصدة + 30 يوم حضور + جهازان، مع `--reset-demo` و`--create-tables`.
 - [x] حاويات: `apps/api/Dockerfile` (مع LibreOffice)، `apps/api/docker-entrypoint.sh` (انتظار DB → `alembic upgrade head` → uvicorn)، `infra/web/Dockerfile` + `infra/nginx/default.conf` (SPA + proxy `/api`) + `.dockerignore`.
 - [x] تشغيل يدوي مُتحقق منه: `uvicorn` على `127.0.0.1:8100` → `/api/health` + تسجيل دخول `admin` + `/api/employees` = 18.
@@ -191,21 +191,29 @@ docker compose exec api python -m app.seed --profile demo
 
 ---
 
-### المرحلة 3 — ربط الواجهة بالـ API
+### المرحلة 3 — ربط الواجهة بالـ API 🟡
 
 **الهدف:** إزالة `localStorage` كطبقة بيانات.
 
-- [ ] إنشاء `services/apiClient.ts` + طبقة توافق تحاكي `StorageService` (async) لتقليل تعديل المكونات.
-- [ ] `AuthContext`: تسجيل دخول/خروج/تجديد/انتهاء جلسة.
-- [ ] `ProtectedRoute` + إخفاء/تعطيل إجراءات الكتابة حسب الدور.
-- [ ] شاشة الدخول الحقيقية + رسائل خطأ واضحة.
-- [ ] الموظفون: CRUD كامل مربوط بالـ API.
-- [ ] الحضور: عرض/إضافة/تعديل/حذف + استيراد Excel مُطبَّع.
-- [ ] لوحة التحكم: KPIs حقيقية + فلاتر.
-- [ ] إزالة الحالة المكررة من `App.tsx` تدريجيًا (React Query أو SWR).
-- [ ] معالجة حالات التحميل/الفراغ/الأخطاء في كل شاشة.
+- [x] إنشاء `src/services/apiClient.ts`: token/session، `request` مع timeout، `ApiError`/`NetworkError`، mappers لكل الكيانات، CRUD، و`fetchAll()`.
+- [x] جلسة الدخول: `fetchMe` عند الإقلاع + تخزين Access Token + خروج + رسائل خطأ واضحة (بدون كشف حالة الخادم عند بيانات غير صحيحة).
+- [x] شاشة الدخول الحقيقية `Login.tsx`: `onLogin() => Promise`, حالة `busy`, وإظهار الحسابات التجريبية في وضع العرض فقط.
+- [x] الأدوار: `src/utils/roles.ts` (`canEdit`, `isAdmin`, `roleLabel`) + إخفاء كل إجراءات الكتابة عن `VIEWER` في الموظفين/الحضور/الإجازات/الأذونات/المأموريات.
+- [x] الموظفون: CRUD كامل مربوط بالـ API (إنشاء/تعديل/حذف منطقي) مع `saving` ورسائل خطأ داخل النموذج.
+- [x] الحضور: عرض/إضافة/استيراد Excel وصور عبر API، وحساب الإضافي عبر `overtimeCalculator` نفسه، upsert حسب `(employee_id, date)`.
+- [x] الإجازات: إنشاء عبر API ثم اعتماد فوري (`decideLeave`) لخصم الرصيد مرة واحدة + أرصدة من `GET /api/leave-balances`.
+- [x] الأذونات والمأموريات: إنشاء مربوط بالـ API مع أخطاء داخل النموذج.
+- [x] `App.tsx`: bootstrap جلسة، `mode: 'api' | 'demo'`، تحميل snapshot موحّد، بانرات demo/error، ومعالجات async.
+- [x] مزامنة ZKTeco معطّلة في وضع API مع بانر صريح (تُفتح في المرحلة 5).
+- [x] إخفاء النسخ الاحتياطي المحلي والترخيص في وضع API (النسخ عبر `pg_dump` لاحقًا).
+- [x] وضع العرض المحلي `VITE_ALLOW_OFFLINE_DEMO` (fallback عند `NetworkError`/5xx فقط) — **يُضبط `false` في صورة الويب الإنتاجية** (`infra/web/Dockerfile` + `docker-compose.yml`).
+- [x] اختبارات: **28/28 Vitest** + **12/12 Playwright** (منها تسجيل حضور، إنشاء واعتماد إجازة، ومنع `VIEWER`) + **26/26 pytest** + lint + build.
+- [ ] نقل الحالة إلى React Query/SWR — مؤجل؛ الحالة الحالية مركزية في `App.tsx` وتكفي لحجم البيانات التجريبي.
+- [ ] سكربت ترحيل `localStorage` → DB — لن يُنفَّذ: وضع العرض المحلي للعرض فقط ولا يُستخدم في الإنتاج (`VITE_ALLOW_OFFLINE_DEMO=false`).
 
-**معيار القبول:** لا يُستخدم `localStorage` لبيانات العمل، وكل الشاشات تعمل عبر API.
+**معيار القبول:** لا تُكتب بيانات عمل من الواجهة الإنتاجية إلى `localStorage`، وكل الشاشات تعمل عبر API. ✅ (وضع العرض المحلي يبقى للتجربة فقط وببانر واضح)
+
+> **إصلاح مهم:** `StorageService.ensureDataVersion()` كان يقارن قيمة مخزّنة JSON-encoded (`"2"`) بنص خام (`2`)، فكان يمسح كل مفاتيح بيانات العمل عند كل نداء في وضع العرض المحلي. تمت القراءة عبر `safeGet` وإضافة اختبار انحدار في `tests/unit/storage.spec.ts`.
 
 ---
 

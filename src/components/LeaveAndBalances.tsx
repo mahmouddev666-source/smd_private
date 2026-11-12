@@ -27,13 +27,14 @@ import {
 import { exportLeaveBalancesToExcel, parseExcelFile } from '../utils/fileExport';
 import { localDateISO } from '../utils/dateUtils';
 import { PhotoImportModal } from './PhotoImportModal';
+import { canEdit } from '../utils/roles';
 
 interface LeaveAndBalancesProps {
   leaves: LeaveRecord[];
   balances: LeaveBalance[];
   employees: Employee[];
   user: UserSession;
-  onAddLeave: (leave: Omit<LeaveRecord, 'id'>) => void;
+  onAddLeave: (leave: Omit<LeaveRecord, 'id'>) => Promise<void>;
   onSelectEmployee: (employeeId: string) => void;
 }
 
@@ -63,6 +64,9 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
   const [activeTab, setActiveTab] = useState<'balances' | 'requests'>('balances');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const userCanEdit = canEdit(user.role);
 
   // New Leave Form State
   const [empId, setEmpId] = useState(employees[0]?.employeeId || '');
@@ -85,21 +89,40 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
     return l.employeeId.includes(searchTerm) || (emp && emp.name.includes(searchTerm)) || l.leaveType.includes(searchTerm);
   });
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAddLeave({
-      employeeId: empId,
-      leaveType,
-      startDate,
-      endDate,
-      daysCount: Number(daysCount),
-      reason,
-      replacementEmployeeId: replacementEmpId,
-      status: 'معتمد',
-      approvedBy: user.name,
-      approvalDate: localDateISO()
-    });
-    setShowAddModal(false);
+    setFormError(null);
+    if (saving) return;
+    if (!empId) {
+      setFormError('يرجى اختيار الموظف.');
+      return;
+    }
+    if (!startDate || !endDate || endDate < startDate) {
+      setFormError('تاريخ الانتهاء يجب أن يكون بعد تاريخ البدء.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onAddLeave({
+        employeeId: empId,
+        leaveType,
+        startDate,
+        endDate,
+        daysCount: Number(daysCount),
+        reason,
+        replacementEmployeeId: replacementEmpId,
+        status: 'معتمد',
+        approvedBy: user.name,
+        approvalDate: localDateISO()
+      });
+      setShowAddModal(false);
+      setFormError(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'تعذر حفظ طلب الإجازة.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
@@ -109,30 +132,34 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
 
   const knownEmployeeIds = new Set(employees.map(e => e.employeeId));
 
-  const handlePhotoImport = (rows: any[]) => {
+  const handlePhotoImport = async (rows: any[]) => {
     setImportErrorMsg(null);
     let addedCount = 0;
-    rows.forEach(r => {
+    for (const r of rows) {
       const employeeId = String(r.employeeId || '');
-      if (!knownEmployeeIds.has(employeeId)) return; // skip unknown employees
-      onAddLeave({
-        employeeId,
-        leaveType: (r.leaveType as LeaveType) || 'اعتيادي',
-        startDate: r.startDate || localDateISO(),
-        endDate: r.endDate || localDateISO(),
-        daysCount: Number(r.daysCount) || 1,
-        reason: r.reason || 'مستورد ضوئياً من صورة نموذج طلب الإجازة',
-        replacementEmployeeId: r.replacementEmployeeId || '',
-        status: 'معتمد',
-        approvedBy: user.name,
-        approvalDate: localDateISO(),
-        notes: 'تم المسح الضوئي والاعتماد آلياً'
-      });
-      addedCount += 1;
-    });
+      if (!knownEmployeeIds.has(employeeId)) continue; // skip unknown employees
+      try {
+        await onAddLeave({
+          employeeId,
+          leaveType: (r.leaveType as LeaveType) || 'اعتيادي',
+          startDate: r.startDate || localDateISO(),
+          endDate: r.endDate || localDateISO(),
+          daysCount: Number(r.daysCount) || 1,
+          reason: r.reason || 'مستورد ضوئياً من صورة نموذج طلب الإجازة',
+          replacementEmployeeId: r.replacementEmployeeId || '',
+          status: 'معتمد',
+          approvedBy: user.name,
+          approvalDate: localDateISO(),
+          notes: 'تم المسح الضوئي والاعتماد آلياً'
+        });
+        addedCount += 1;
+      } catch {
+        // Skip rows the server rejects (overlapping dates, exhausted balance…).
+      }
+    }
     setImportSuccessMsg(
       `تم استيراد ${addedCount} طلب إجازة بنجاح وخصمها من الأرصدة` +
-      (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل.` : '!'),
+      (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل أو غير صالح.` : '!'),
     );
     setTimeout(() => setImportSuccessMsg(null), 4500);
   };
@@ -148,28 +175,32 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
         return;
       }
       let addedCount = 0;
-      rows.forEach((r: any) => {
+      for (const r of rows as any[]) {
         const empId = String(r['كود الموظف'] || r['كود'] || r['Employee ID'] || r['employeeId'] || '');
-        if (!knownEmployeeIds.has(empId)) return; // skip unknown employees
+        if (!knownEmployeeIds.has(empId)) continue; // skip unknown employees
         const lType = (r['نوع الإجازة'] || r['Leave Type'] || 'اعتيادي') as LeaveType;
         const sDate = String(r['تاريخ البدء'] || r['Start Date'] || localDateISO());
         const eDate = String(r['تاريخ الانتهاء'] || r['End Date'] || sDate);
         const days = Number(r['عدد الأيام'] || r['Days'] || 1);
         const reasonText = String(r['السبب'] || r['Reason'] || 'مستورد من ملف Excel');
 
-        onAddLeave({
-          employeeId: empId,
-          leaveType: lType,
-          startDate: sDate,
-          endDate: eDate,
-          daysCount: days,
-          reason: reasonText,
-          status: 'معتمد',
-          approvedBy: user.name,
-          approvalDate: localDateISO()
-        });
-        addedCount++;
-      });
+        try {
+          await onAddLeave({
+            employeeId: empId,
+            leaveType: lType,
+            startDate: sDate,
+            endDate: eDate,
+            daysCount: days,
+            reason: reasonText,
+            status: 'معتمد',
+            approvedBy: user.name,
+            approvalDate: localDateISO()
+          });
+          addedCount++;
+        } catch {
+          // Skip rows the server rejects (overlapping dates, exhausted balance…).
+        }
+      }
       setImportSuccessMsg(
         `تم استيراد ${addedCount} طلب إجازة بنجاح من ملف Excel` +
         (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل أو بيانات غير صالحة.` : '!'),
@@ -208,24 +239,28 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           
           {/* CAMERA / PHOTO IMPORT BUTTON */}
-          <button
-            onClick={() => setShowPhotoModal(true)}
-            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-            title="تصوير نموذج طلب الإجازة أو التقرير الطبي واستخراج البيانات آلياً"
-          >
-            <Camera className="w-4 h-4 text-cyan-200" />
-            <span>استيراد بالتصوير (كاميرا)</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => setShowPhotoModal(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              title="تصوير نموذج طلب الإجازة أو التقرير الطبي واستخراج البيانات آلياً"
+            >
+              <Camera className="w-4 h-4 text-cyan-200" />
+              <span>استيراد بالتصوير (كاميرا)</span>
+            </button>
+          )}
 
           {/* EXCEL IMPORT BUTTON */}
-          <button
-            onClick={() => excelInputRef.current?.click()}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-            title="استيراد إجازات من ملف Excel أو CSV"
-          >
-            <Upload className="w-4 h-4 text-slate-600" />
-            <span>استيراد Excel</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="استيراد إجازات من ملف Excel أو CSV"
+            >
+              <Upload className="w-4 h-4 text-slate-600" />
+              <span>استيراد Excel</span>
+            </button>
+          )}
 
           {/* EXCEL EXPORT BUTTON */}
           <button
@@ -237,13 +272,15 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
           </button>
 
           {/* ADD LEAVE BUTTON */}
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>طلب إجازة جديد</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => { setFormError(null); setShowAddModal(true); }}
+              className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>طلب إجازة جديد</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -448,12 +485,17 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
       {/* Add Leave Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-modal-title"
+            className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl"
+          >
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
-              <h3 className="text-sm font-bold text-slate-900">
+              <h3 id="leave-modal-title" className="text-sm font-bold text-slate-900">
                 تسجيل طلب إجازة رسمي جديد
               </h3>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600 font-bold">
+              <button onClick={() => { setShowAddModal(false); setFormError(null); }} className="text-slate-400 hover:text-slate-600 font-bold" aria-label="إغلاق">
                 ✕
               </button>
             </div>
@@ -564,19 +606,27 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
                 />
               </div>
 
+              {formError && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-[11px] text-rose-800 leading-relaxed flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => { setShowAddModal(false); setFormError(null); }}
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg shadow-sm"
+                  disabled={saving}
+                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer disabled:cursor-wait"
                 >
-                  اعتماد وخصم من الرصيد
+                  {saving ? 'جارٍ الاعتماد...' : 'اعتماد وخصم من الرصيد'}
                 </button>
               </div>
             </form>

@@ -155,6 +155,25 @@ describe('StorageService — leave balances', () => {
   });
 });
 
+describe('StorageService — data version', () => {
+  it('keeps business data when ensureDataVersion runs again', () => {
+    StorageService.ensureDataVersion();
+    StorageService.addEmployee(realEmployee);
+    StorageService.addAttendanceRecord(attendanceFor('18:30'));
+
+    // Regression: the version marker is JSON-encoded, so a raw string compare
+    // used to wipe every business key on each call.
+    StorageService.ensureDataVersion();
+
+    expect(StorageService.findEmployee('1500')?.name).toBe(realEmployee.name);
+    expect(
+      StorageService.getAttendance().some(
+        (record) => record.employeeId === '1500' && record.date === localDateISO(),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('StorageService — demo data isolation', () => {
   it('resetDemoData keeps real records and removes demo records', () => {
     StorageService.addEmployee(realEmployee);

@@ -43,3 +43,16 @@ class LeaveOut(ORMModel):
     notes: str
     is_demo: bool
     created_at: datetime
+
+
+class LeaveBalanceOut(ORMModel):
+    id: str
+    employee_id: str
+    year: int
+    annual_total: float
+    annual_used: float
+    casual_total: float
+    casual_used: float
+    sick_total: float
+    sick_used: float
+    is_demo: bool

@@ -26,12 +26,13 @@ import { exportAttendanceToExcel, parseExcelFile } from '../utils/fileExport';
 import { calculateOvertime } from '../utils/overtimeCalculator';
 import { isValidISODate, localDateISO, normalizeTime } from '../utils/dateUtils';
 import { PhotoImportModal } from './PhotoImportModal';
+import { canEdit } from '../utils/roles';
 
 interface AttendanceManagerProps {
   attendance: AttendanceRecord[];
   employees: Employee[];
   user: UserSession;
-  onAddAttendance: (record: Omit<AttendanceRecord, 'id'>) => void;
+  onAddAttendance: (record: Omit<AttendanceRecord, 'id'>) => Promise<void>;
   onSelectEmployee: (employeeId: string) => void;
 }
 
@@ -45,6 +46,8 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterShift, setFilterShift] = useState<string>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const userCanEdit = canEdit(user.role);
 
   // New Record State
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.employeeId || '');
@@ -71,9 +74,10 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const hasExistingRecord = (employeeId: string, recordDate: string): boolean =>
     attendance.some(r => r.employeeId === employeeId && r.date === recordDate);
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    if (saving) return;
 
     if (!selectedEmpId || !empMap.has(selectedEmpId)) {
       setFormError('يرجى اختيار موظف صالح من القائمة.');
@@ -95,53 +99,14 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
 
     const ot = calculateOvertime(shiftType, normalizedIn, normalizedOut, hourlyRate);
 
-    onAddAttendance({
-      employeeId: selectedEmpId,
-      date,
-      shiftType,
-      checkIn: normalizedIn,
-      checkOut: normalizedOut,
-      workingHours: ot.actualWorkedHours,
-      standardHours: ot.standardHours,
-      overtimeHoursTotal: ot.totalOvertimeHours,
-      dayOvertimeHours: ot.dayOvertimeHours,
-      nightOvertimeHours: ot.nightOvertimeHours,
-      dayOvertimePay: ot.dayOvertimePay,
-      nightOvertimePay: ot.nightOvertimePay,
-      totalOvertimePay: ot.totalOvertimePay,
-      source: 'يدوي (معدل بواسطة المشرف)',
-      status: ot.suggestedStatus,
-      notes
-    });
-
-    setShowAddModal(false);
-  };
-
-  const [showPhotoModal, setShowPhotoModal] = useState(false);
-  const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
-  const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
-  const excelInputRef = React.useRef<HTMLInputElement | null>(null);
-
-  const handlePhotoImport = (rows: any[]) => {
-    setImportErrorMsg(null);
-    let addedCount = 0;
-    rows.forEach(r => {
-      const employeeId = String(r.employeeId || '');
-      const emp = empMap.get(employeeId);
-      if (!emp) return; // Unknown employee codes are skipped, never invented.
-
-      const recordDate = isValidISODate(r.date) ? String(r.date) : localDateISO();
-      const recordIn = normalizeTime(r.checkIn) || '08:00';
-      const recordOut = normalizeTime(r.checkOut) || '16:00';
-      const recordShift = (r.shiftType as ShiftType) || 'NORMAL_DAY';
-      const ot = calculateOvertime(recordShift, recordIn, recordOut, emp.hourlyRate);
-
-      onAddAttendance({
-        employeeId,
-        date: recordDate,
-        shiftType: recordShift,
-        checkIn: recordIn,
-        checkOut: recordOut,
+    setSaving(true);
+    try {
+      await onAddAttendance({
+        employeeId: selectedEmpId,
+        date,
+        shiftType,
+        checkIn: normalizedIn,
+        checkOut: normalizedOut,
         workingHours: ot.actualWorkedHours,
         standardHours: ot.standardHours,
         overtimeHoursTotal: ot.totalOvertimeHours,
@@ -150,12 +115,61 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         dayOvertimePay: ot.dayOvertimePay,
         nightOvertimePay: ot.nightOvertimePay,
         totalOvertimePay: ot.totalOvertimePay,
-        source: 'تصوير المستند (OCR Scan)',
+        source: 'يدوي (معدل بواسطة المشرف)',
         status: ot.suggestedStatus,
-        notes: r.notes || 'مستورد آلياً عبر تصوير كشف البصمة'
+        notes
       });
-      addedCount += 1;
-    });
+      setShowAddModal(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'تعذر حفظ حركة الحضور.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
+  const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
+  const excelInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const handlePhotoImport = async (rows: any[]) => {
+    setImportErrorMsg(null);
+    let addedCount = 0;
+    for (const r of rows) {
+      const employeeId = String(r.employeeId || '');
+      const emp = empMap.get(employeeId);
+      if (!emp) continue; // Unknown employee codes are skipped, never invented.
+
+      const recordDate = isValidISODate(r.date) ? String(r.date) : localDateISO();
+      const recordIn = normalizeTime(r.checkIn) || '08:00';
+      const recordOut = normalizeTime(r.checkOut) || '16:00';
+      const recordShift = (r.shiftType as ShiftType) || 'NORMAL_DAY';
+      const ot = calculateOvertime(recordShift, recordIn, recordOut, emp.hourlyRate);
+
+      try {
+        await onAddAttendance({
+          employeeId,
+          date: recordDate,
+          shiftType: recordShift,
+          checkIn: recordIn,
+          checkOut: recordOut,
+          workingHours: ot.actualWorkedHours,
+          standardHours: ot.standardHours,
+          overtimeHoursTotal: ot.totalOvertimeHours,
+          dayOvertimeHours: ot.dayOvertimeHours,
+          nightOvertimeHours: ot.nightOvertimeHours,
+          dayOvertimePay: ot.dayOvertimePay,
+          nightOvertimePay: ot.nightOvertimePay,
+          totalOvertimePay: ot.totalOvertimePay,
+          source: 'تصوير المستند (OCR Scan)',
+          status: ot.suggestedStatus,
+          notes: r.notes || 'مستورد آلياً عبر تصوير كشف البصمة'
+        });
+        addedCount += 1;
+      } catch {
+        // Skip rows the server rejects (duplicate date, missing employee…).
+      }
+    }
     setImportSuccessMsg(
       `تم استيراد ${addedCount} حركة حضور بنجاح واحتساب الإضافي آلياً` +
       (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل أو بيانات غير صالحة.` : '!'),
@@ -174,40 +188,44 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         return;
       }
       let addedCount = 0;
-      rows.forEach((r: any) => {
+      for (const r of rows as any[]) {
         const empId = String(r['كود الموظف'] || r['كود'] || r['Employee ID'] || r['employeeId'] || '');
         const emp = empMap.get(empId);
-        if (!emp) return; // Unknown employee codes are skipped.
+        if (!emp) continue; // Unknown employee codes are skipped.
 
         const rawDate = String(r['التاريخ'] || r['Date'] || localDateISO());
         const recordDate = isValidISODate(rawDate) ? rawDate : localDateISO();
         const checkInTime = normalizeTime(String(r['حضور'] || r['Check In'] || r['وقت الحضور'] || '08:00'));
         const checkOutTime = normalizeTime(String(r['انصراف'] || r['Check Out'] || r['وقت الانصراف'] || '16:00'));
-        if (!checkInTime || !checkOutTime) return;
+        if (!checkInTime || !checkOutTime) continue;
 
         const shift = (r['الوردية']?.includes('نهار') ? 'DAY_SHIFT' : r['الوردية']?.includes('ليل') ? 'NIGHT_SHIFT' : 'NORMAL_DAY') as ShiftType;
         const ot = calculateOvertime(shift, checkInTime, checkOutTime, emp.hourlyRate);
 
-        onAddAttendance({
-          employeeId: empId,
-          date: recordDate,
-          shiftType: shift,
-          checkIn: checkInTime,
-          checkOut: checkOutTime,
-          workingHours: ot.actualWorkedHours,
-          standardHours: ot.standardHours,
-          overtimeHoursTotal: ot.totalOvertimeHours,
-          dayOvertimeHours: ot.dayOvertimeHours,
-          nightOvertimeHours: ot.nightOvertimeHours,
-          dayOvertimePay: ot.dayOvertimePay,
-          nightOvertimePay: ot.nightOvertimePay,
-          totalOvertimePay: ot.totalOvertimePay,
-          source: 'استيراد ملف Excel',
-          status: ot.suggestedStatus,
-          notes: 'مستورد من ملف Excel / كشف الحضور'
-        });
-        addedCount++;
-      });
+        try {
+          await onAddAttendance({
+            employeeId: empId,
+            date: recordDate,
+            shiftType: shift,
+            checkIn: checkInTime,
+            checkOut: checkOutTime,
+            workingHours: ot.actualWorkedHours,
+            standardHours: ot.standardHours,
+            overtimeHoursTotal: ot.totalOvertimeHours,
+            dayOvertimeHours: ot.dayOvertimeHours,
+            nightOvertimeHours: ot.nightOvertimeHours,
+            dayOvertimePay: ot.dayOvertimePay,
+            nightOvertimePay: ot.nightOvertimePay,
+            totalOvertimePay: ot.totalOvertimePay,
+            source: 'استيراد ملف Excel',
+            status: ot.suggestedStatus,
+            notes: 'مستورد من ملف Excel / كشف الحضور'
+          });
+          addedCount++;
+        } catch {
+          // Skip rows the server rejects (duplicate date, missing employee…).
+        }
+      }
       setImportSuccessMsg(
         `تم استيراد ${addedCount} حركة حضور بنجاح من ملف Excel` +
         (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل أو بيانات غير صالحة.` : '!'),
@@ -246,24 +264,28 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           
           {/* CAMERA / PHOTO IMPORT BUTTON */}
-          <button
-            onClick={() => setShowPhotoModal(true)}
-            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-            title="تصوير كشف الحضور الورقي واستخراج الحركات والإضافي آلياً"
-          >
-            <Camera className="w-4 h-4 text-cyan-200" />
-            <span>استيراد بالتصوير (كاميرا)</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => setShowPhotoModal(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              title="تصوير كشف الحضور الورقي واستخراج الحركات والإضافي آلياً"
+            >
+              <Camera className="w-4 h-4 text-cyan-200" />
+              <span>استيراد بالتصوير (كاميرا)</span>
+            </button>
+          )}
 
           {/* EXCEL IMPORT BUTTON */}
-          <button
-            onClick={() => excelInputRef.current?.click()}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-            title="استيراد سجلات الحضور من ملف Excel أو CSV"
-          >
-            <Upload className="w-4 h-4 text-slate-600" />
-            <span>استيراد Excel</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="استيراد سجلات الحضور من ملف Excel أو CSV"
+            >
+              <Upload className="w-4 h-4 text-slate-600" />
+              <span>استيراد Excel</span>
+            </button>
+          )}
 
           {/* EXCEL EXPORT BUTTON */}
           <button
@@ -275,13 +297,15 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           </button>
 
           {/* ADD RECORD BUTTON */}
-          <button
-            onClick={() => { setFormError(null); setShowAddModal(true); }}
-            className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>تسجيل حركة حضور / إضافي</span>
-          </button>
+          {userCanEdit && (
+            <button
+              onClick={() => { setFormError(null); setShowAddModal(true); }}
+              className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>تسجيل حركة حضور / إضافي</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -587,9 +611,10 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg shadow-sm"
+                  disabled={saving}
+                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer disabled:cursor-wait"
                 >
-                  احتساب وحفظ السجل
+                  {saving ? 'جارٍ الحفظ...' : 'احتساب وحفظ السجل'}
                 </button>
               </div>
             </form>

@@ -6,20 +6,24 @@
  * - كلمة المرور ( Password )
  * with prominent SMD logo.
  *
- * PHASE-1 NOTE
- * ------------
- * Authentication is still client-side (DEMO_MODE). Credentials are hard-coded
- * demo accounts and the session is only a UI gate. Phase 2 replaces this with
- * FastAPI + JWT/HttpOnly cookies and server-side authorization. Do NOT deploy
- * this build as-is on an untrusted network.
+ * Authentication now goes through the FastAPI backend
+ * (`POST /api/auth/login` → JWT bearer token). The demo accounts below are
+ * shown only while `VITE_ALLOW_OFFLINE_DEMO` is enabled; production builds set
+ * it to `false` so credentials are never checked in the browser.
  */
 
 import React, { useState } from 'react';
-import { UserRole, UserSession } from '../types';
+import { UserRole } from '../types';
 import { AlertCircle, LogIn, Lock, User as UserIcon } from 'lucide-react';
 
 interface LoginProps {
-  onLogin: (session: UserSession) => void;
+  /**
+   * Resolves when the session is established (API or offline demo).
+   * Rejects with a user-facing Arabic message on failure.
+   */
+  onLogin: (username: string, password: string) => Promise<void>;
+  /** Show the hard-coded demo accounts (development / offline preview only). */
+  showDemoAccounts?: boolean;
 }
 
 interface DemoAccount {
@@ -59,29 +63,34 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
   },
 ];
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, showDemoAccounts = true }) => {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('Admin@12345');
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setError(null);
 
-    const normalizedUsername = username.trim().toLowerCase();
-    const account = DEMO_ACCOUNTS.find((item) => item.username === normalizedUsername);
-
-    if (!account || account.password !== password) {
-      setError('اسم المستخدم أو كلمة المرور غير صحيحة. تحقق من بيانات الحساب التجريبي أدناه.');
+    if (!username.trim() || !password) {
+      setError('يرجى إدخال اسم المستخدم وكلمة المرور.');
       return;
     }
 
-    onLogin({
-      id: account.id,
-      name: account.name,
-      email: account.email,
-      role: account.role,
-    });
+    setBusy(true);
+    try {
+      await onLogin(username, password);
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'اسم المستخدم أو كلمة المرور غير صحيحة.',
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -141,6 +150,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   autoComplete="username"
                   placeholder="admin"
                   required
+                  disabled={busy}
                 />
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                   <UserIcon className="w-4 h-4" />
@@ -165,6 +175,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   autoComplete="current-password"
                   placeholder="Password"
                   required
+                  disabled={busy}
                 />
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                   <Lock className="w-4 h-4" />
@@ -185,34 +196,38 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <div className="pt-2">
               <button
                 type="submit"
-                className="w-full py-3 px-4 bg-blue-700 hover:bg-blue-800 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={busy}
+                className="w-full py-3 px-4 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 disabled:cursor-wait text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogIn className="w-4 h-4" />
-                <span>تسجيل الدخول</span>
+                <span>{busy ? 'جارٍ التحقق من البيانات...' : 'تسجيل الدخول'}</span>
               </button>
             </div>
           </form>
 
-          <details className="mt-5 rounded-xl border border-amber-300 bg-amber-50/70 p-3">
-            <summary className="text-[11px] font-bold text-amber-900 cursor-pointer">
-              بيانات الحسابات التجريبية (DEMO)
-            </summary>
-            <ul className="mt-2 space-y-1.5 text-[11px] text-amber-950 font-mono" dir="ltr">
-              {DEMO_ACCOUNTS.map((account) => (
-                <li key={account.username} className="flex items-center justify-between gap-2">
-                  <span>{account.username} / {account.password}</span>
-                  <span className="text-amber-700 font-sans">{account.role}</span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-[10px] text-amber-800 leading-relaxed">
-              هذه حسابات تجريبية للاختبار فقط. سيتم استبدالها بمصادقة الخادم (FastAPI) قبل التشغيل الفعلي.
-            </p>
-          </details>
+          {showDemoAccounts && (
+            <details className="mt-5 rounded-xl border border-amber-300 bg-amber-50/70 p-3">
+              <summary className="text-[11px] font-bold text-amber-900 cursor-pointer">
+                بيانات الحسابات التجريبية (DEMO)
+              </summary>
+              <ul className="mt-2 space-y-1.5 text-[11px] text-amber-950 font-mono" dir="ltr">
+                {DEMO_ACCOUNTS.map((account) => (
+                  <li key={account.username} className="flex items-center justify-between gap-2">
+                    <span>{account.username} / {account.password}</span>
+                    <span className="text-amber-700 font-sans">{account.role}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[10px] text-amber-800 leading-relaxed">
+                هذه حسابات تجريبية للاختبار فقط وتعمل عبر خادم FastAPI. عند تعذّر الاتصال بالخادم
+                يمكن فتح وضع العرض المحلي مؤقتًا في بيئة التطوير فقط.
+              </p>
+            </details>
+          )}
 
           <div className="mt-6 text-center">
             <p className="text-[11px] text-slate-400 font-mono">
-              خادم محلي مؤقت · DEMO_MODE · SMD-2026
+              SMD-HR · FastAPI + PostgreSQL · SMD-2026
             </p>
           </div>
         </div>

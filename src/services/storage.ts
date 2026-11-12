@@ -135,7 +135,9 @@ export const StorageService = {
    * Safe to call on every boot: it only writes when a migration is required.
    */
   ensureDataVersion(): void {
-    const stored = localStorage.getItem(KEYS.DATA_VERSION);
+    // Read through `safeGet`: values are stored JSON-encoded, so a raw
+    // `getItem` would return `"2"` (with quotes) and never match.
+    const stored = safeGet<string | null>(KEYS.DATA_VERSION, null);
     if (stored === CURRENT_DATA_VERSION) return;
 
     const employees = safeGet<Employee[] | null>(KEYS.EMPLOYEES, null);

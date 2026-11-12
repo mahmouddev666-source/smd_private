@@ -26,9 +26,11 @@
 
 > 🟡 المشروع في مرحلة إعادة بناء للوصول للإنتاج.
 
-- **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (24/24).
+- **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (26/26).
 - **Docker جاهز**: `docker-compose.yml` يشغّل `db` + `api` + `web` (nginx). تعذّر التحقق منه على جهاز التطوير الحالي لعدم توفر Docker Desktop/WSL2.
-- **الواجهة** ما زالت تقرأ البيانات من `localStorage`؛ الربط بالـ API هو المرحلة التالية (3).
+- **الواجهة مربوطة بالـ API** (المرحلة 3): تسجيل الدخول، الموظفون، الحضور، الإجازات والأرصدة، الأذونات والمأموريات — كلها عبر `/api`. اختبارات: 28/28 Vitest + 12/12 Playwright.
+- **وضع العرض المحلي** (`VITE_ALLOW_OFFLINE_DEMO`) يبقى للتجربة فقط عند تعذّر الخادم، ومُعطَّل في صورة الإنتاج (`false`) حتى لا تُكتب بيانات عمل في المتصفح.
+- **مزامنة ZKTeco معطّلة** في وضع API حتى المرحلة 5، مع بانر واضح في الشاشة.
 
 راجع `docs/PLAN.md` أو خطة التنفيذ لمزيد من التفاصيل.
 
@@ -77,9 +79,11 @@ npm run dev      # تشغيل التطوير على المنفذ 3000
 npm run build    # بناء الإنتاج إلى dist/
 npm run preview  # معاينة بناء الإنتاج
 npm run lint     # فحص TypeScript (tsc --noEmit)
+npm test         # اختبارات الوحدة (Vitest)
+npx playwright test  # اختبارات E2E
 ```
 
-> البيانات الحالية تُحفظ في `localStorage` وتُفقد عند مسح بيانات المتصفح.
+> بدون خادم API تعمل الواجهة في **وضع العرض المحلي التجريبي** (بانر واضح) والبيانات من `initialData` في الذاكرة/المتصفح. في الإنتاج `VITE_ALLOW_OFFLINE_DEMO=false` فلا يوجد أي fallback محلي.
 
 ---
 
@@ -158,6 +162,7 @@ docker compose exec api python -m app.seed --reset-demo
 | `TZ` | المنطقة الزمنية | `Africa/Cairo` |
 | `WEB_PORT` | منفذ الواجهة على الجهاز | `80` |
 | `SEED_DEMO_ON_START` | تعبئة بيانات تجريبية عند الإقلاع | `false` |
+| `VITE_ALLOW_OFFLINE_DEMO` | السماح بوضع العرض المحلي عند تعذّر API (يجب أن يبقى `false` في الإنتاج) | `false` |
 | `STORAGE_DIR` | مسار تخزين الملفات | `/data/uploads` |
 | `MAX_UPLOAD_MB` | حد حجم الملف | `20` |
 | `ZK_SYNC_INTERVAL_MINUTES` | فترة مزامنة البصمة | `10` |

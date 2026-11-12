@@ -116,4 +116,55 @@ test.describe('SMD-HR baseline', () => {
     await page.getByRole('button', {name: 'تأكيد الحذف'}).click();
     await expect(page.getByText('م. أحمد محمود سعيد - معدل')).toHaveCount(0);
   });
+
+  test('admin records attendance and the overtime row is saved', async ({page}) => {
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await page.getByRole('button', {name: 'الحضور والورديات'}).first().click();
+
+    await page.getByRole('button', {name: 'تسجيل حركة حضور / إضافي'}).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Use a far-future date so the record is unique even across reruns.
+    await dialog.locator('input[type="date"]').fill('2030-05-05');
+    await page.getByRole('button', {name: 'احتساب وحفظ السجل'}).click();
+
+    await expect(dialog).toHaveCount(0);
+    const row = page.getByRole('row', {name: /2030-05-05/});
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('إدخال يدوي');
+  });
+
+  test('admin creates a leave request and it appears in the approved log', async ({page}) => {
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await page.getByRole('button', {name: 'الإجازات والأرصدة'}).first().click();
+
+    await page.getByRole('button', {name: 'طلب إجازة جديد'}).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // Leave type = عارضة (second select), 1 day, future period.
+    await dialog.locator('select').nth(1).selectOption('عارضة');
+    const dateInputs = dialog.locator('input[type="date"]');
+    await dateInputs.nth(0).fill('2030-06-01');
+    await dateInputs.nth(1).fill('2030-06-01');
+    await page.getByRole('button', {name: 'اعتماد وخصم من الرصيد'}).click();
+
+    await expect(dialog).toHaveCount(0);
+    await page.getByRole('button', {name: /سجل الإجازات المسجلة والمعتمدة/}).click();
+    await expect(page.getByText('2030-06-01 إلى 2030-06-01').first()).toBeVisible();
+  });
+
+  test('viewer role cannot record attendance or leaves', async ({page}) => {
+    await page.getByLabel(/اسم المستخدم/).fill('viewer');
+    await page.getByLabel(/كلمة المرور/).fill('Viewer@12345');
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+
+    await page.getByRole('button', {name: 'الحضور والورديات'}).first().click();
+    await expect(page.getByRole('button', {name: 'تسجيل حركة حضور / إضافي'})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'استيراد Excel'})).toHaveCount(0);
+
+    await page.getByRole('button', {name: 'الإجازات والأرصدة'}).first().click();
+    await expect(page.getByRole('button', {name: 'طلب إجازة جديد'})).toHaveCount(0);
+  });
 });
