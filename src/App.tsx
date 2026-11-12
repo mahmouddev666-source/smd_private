@@ -700,7 +700,17 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'forms' && <FormsManager user={user} apiEnabled={mode === 'api'} />}
+        {activeTab === 'forms' && (
+          <FormsManager
+            user={user}
+            apiEnabled={mode === 'api'}
+            demoEnabled={api.ALLOW_OFFLINE_DEMO}
+            employees={employees}
+            leaves={leaves}
+            permits={permits}
+            missions={missions}
+          />
+        )}
 
         {activeTab === 'architecture' && <ArchitectureAndDbView />}
 

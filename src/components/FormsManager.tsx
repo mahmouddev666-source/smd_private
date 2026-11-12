@@ -5,8 +5,12 @@
  *
  * Nothing here re-draws a document: previews always show the original file
  * (Word/Excel are converted to PDF on the server by LibreOffice).
- * The field designer / filler lives in `FormDesigner` (next task) and reuses
- * the same viewer.
+ *
+ * Storage goes through `FormStore`:
+ *   - `apiFormStore` when the FastAPI server is reachable (real use);
+ *   - `getDemoFormStore()` in trial builds, which keeps everything in this
+ *     browser's IndexedDB. That mode is clearly labelled as temporary and is
+ *     disabled in the production image (`VITE_ALLOW_OFFLINE_DEMO=false`).
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -24,6 +28,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   Trash2,
@@ -32,11 +37,21 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { FormFile, FormTemplate, UserSession } from '../types';
-import * as api from '../services/apiClient';
+import {
+  Employee,
+  FormFile,
+  FormSubmission,
+  FormTemplate,
+  LeaveRecord,
+  MissionRecord,
+  PermitRecord,
+  UserSession,
+} from '../types';
+import { apiFormStore, FormStore, getDemoFormStore } from '../services/formStore';
 import { canEdit } from '../utils/roles';
 import { FormDocumentViewer } from './forms/FormDocumentViewer';
 import { FormDesigner } from './forms/FormDesigner';
+import { FormFiller } from './forms/FormFiller';
 
 const MAX_UPLOAD_MB = 20;
 
@@ -52,8 +67,17 @@ const DEFAULT_CATEGORIES = [
 
 interface FormsManagerProps {
   user: UserSession;
-  /** False in the offline demo build: the document engine needs the server. */
+  /** True when the FastAPI server is the active data source. */
   apiEnabled: boolean;
+  /**
+   * Trial builds only (`VITE_ALLOW_OFFLINE_DEMO`): allow the browser-only
+   * IndexedDB store when the API is not running. Never enabled in production.
+   */
+  demoEnabled?: boolean;
+  employees?: Employee[];
+  leaves?: LeaveRecord[];
+  permits?: PermitRecord[];
+  missions?: MissionRecord[];
 }
 
 interface UploadState {
@@ -114,13 +138,30 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) => {
+export const FormsManager: React.FC<FormsManagerProps> = ({
+  user,
+  apiEnabled,
+  demoEnabled = false,
+  employees = [],
+  leaves = [],
+  permits = [],
+  missions = [],
+}) => {
   const editor = canEdit(user.role);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Real server when available; otherwise the temporary browser store, but only
+  // when the build allows it. `null` means the engine is unavailable here.
+  const store = useMemo<FormStore | null>(() => {
+    if (apiEnabled) return apiFormStore;
+    if (demoEnabled) return getDemoFormStore();
+    return null;
+  }, [apiEnabled, demoEnabled]);
+  const demoMode = store?.mode === 'demo';
+
   const [files, setFiles] = useState<FormFile[]>([]);
   const [templates, setTemplates] = useState<FormTemplate[]>([]);
-  const [loading, setLoading] = useState(apiEnabled);
+  const [loading, setLoading] = useState(Boolean(store));
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -132,32 +173,40 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
   const [pendingDeleteTemplate, setPendingDeleteTemplate] = useState<FormTemplate | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [designer, setDesigner] = useState<FormTemplate | null>(null);
+  const [filler, setFiller] = useState<FormTemplate | null>(null);
   const [templateModal, setTemplateModal] = useState<TemplateModalState | null>(null);
 
   // -------------------------------------------------------------------------
   // Loading
   // -------------------------------------------------------------------------
   const load = useCallback(async () => {
-    if (!apiEnabled) {
+    if (!store) {
       setLoading(false);
       return;
     }
     setRefreshing(true);
     try {
       const [fileRows, templateRows] = await Promise.all([
-        api.fetchFormFiles(),
-        api.fetchFormTemplates(),
+        store.listFiles(),
+        store.listTemplates(),
       ]);
       setFiles(fileRows);
       setTemplates(templateRows);
       setError(null);
     } catch (loadError) {
-      setError(messageOf(loadError, 'تعذر تحميل مكتبة المستندات من الخادم.'));
+      setError(
+        messageOf(
+          loadError,
+          store.mode === 'demo'
+            ? 'تعذر تحميل المكتبة من التخزين المحلي للتجربة.'
+            : 'تعذر تحميل مكتبة المستندات من الخادم.',
+        ),
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [apiEnabled]);
+  }, [store]);
 
   useEffect(() => {
     void load();
@@ -165,18 +214,28 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
 
   // Close any open overlay with Escape.
   useEffect(() => {
-    if (!preview && !designer && !templateModal && !pendingDeleteFile && !pendingDeleteTemplate) return;
+    if (
+      !preview &&
+      !designer &&
+      !filler &&
+      !templateModal &&
+      !pendingDeleteFile &&
+      !pendingDeleteTemplate
+    ) {
+      return;
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setPreview(null);
       setDesigner(null);
+      setFiller(null);
       setTemplateModal(null);
       setPendingDeleteFile(null);
       setPendingDeleteTemplate(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [preview, designer, templateModal, pendingDeleteFile, pendingDeleteTemplate]);
+  }, [preview, designer, filler, templateModal, pendingDeleteFile, pendingDeleteTemplate]);
 
   const fileById = useMemo(
     () => new Map(files.map((file) => [file.id, file])),
@@ -207,7 +266,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
   // -------------------------------------------------------------------------
   const handleFiles = useCallback(
     async (incoming: FileList | File[]) => {
-      if (!editor) return;
+      if (!editor || !store) return;
       const chosen = Array.from(incoming);
       if (chosen.length === 0) return;
 
@@ -220,7 +279,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
         }
         setUpload({ name: file.name, percent: 0 });
         try {
-          const uploaded = await api.uploadFormFile(file, (percent) =>
+          const uploaded = await store.uploadFile(file, (percent) =>
             setUpload({ name: file.name, percent }),
           );
           setFiles((current) => [uploaded, ...current]);
@@ -235,14 +294,15 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
-    [editor],
+    [editor, store],
   );
 
   const handleDeleteFile = async (file: FormFile) => {
+    if (!store) return;
     setPendingDeleteFile(null);
     setError(null);
     try {
-      await api.deleteFormFile(file.id);
+      await store.deleteFile(file.id);
       setFiles((current) => current.filter((row) => row.id !== file.id));
       setNotice(`تم حذف الملف «${file.originalName}».`);
     } catch (deleteError) {
@@ -251,14 +311,46 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
   };
 
   const handleDeleteTemplate = async (template: FormTemplate) => {
+    if (!store) return;
     setPendingDeleteTemplate(null);
     setError(null);
     try {
-      await api.deleteFormTemplate(template.id);
+      await store.deleteTemplate(template.id);
       setTemplates((current) => current.filter((row) => row.id !== template.id));
       setNotice(`تم حذف القالب «${template.name}».`);
     } catch (deleteError) {
       setError(messageOf(deleteError, 'تعذر حذف القالب.'));
+    }
+  };
+
+  const handleResetDemo = async () => {
+    if (!store?.reset) return;
+    setError(null);
+    try {
+      await store.reset();
+      setFiles([]);
+      setTemplates([]);
+      setPreview(null);
+      setDesigner(null);
+      setFiller(null);
+      setNotice('تم مسح كل بيانات التجربة من هذا المتصفح.');
+    } catch (resetError) {
+      setError(messageOf(resetError, 'تعذر مسح بيانات التجربة.'));
+    }
+  };
+
+  const handleDownloadFile = async (file: FormFile) => {
+    if (!store) return;
+    try {
+      const blob = await store.downloadFile(file.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.originalName;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (downloadError) {
+      setError(messageOf(downloadError, 'تعذر تنزيل الملف.'));
     }
   };
 
@@ -281,10 +373,19 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
     setDesigner(template);
   };
 
+  const openFiller = (template: FormTemplate) => {
+    if (!fileById.get(template.fileId)) {
+      setError('ملف هذا القالب غير موجود في المكتبة. أعد رفع المستند قبل تعبئته.');
+      return;
+    }
+    setFiller(template);
+  };
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
-  if (!apiEnabled) {
+  // No server and no trial store: the production build never falls back.
+  if (!store) {
     return (
       <div className="space-y-4">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
@@ -299,11 +400,8 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
         >
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <span>
-            أنت الآن في وضع العرض المحلي التجريبي. مكتبة المستندات تعمل على الخادم فقط — شغّل
-            {' '}
-            <code className="font-mono">docker compose up</code>
-            {' '}
-            ثم سجّل الدخول من جديد لرفع مستندات الشركة وعرضها.
+            محرك المستندات يعمل على الخادم. شغّل الـ API ثم سجّل الدخول من جديد لرفع مستندات الشركة
+            وعرضها وتعبئتها. وضع التجربة المحلي معطّل في نسخة الإنتاج.
           </span>
         </div>
       </div>
@@ -315,7 +413,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+        accept={demoMode ? '.pdf,.png,.jpg,.jpeg,.webp' : '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg'}
         className="hidden"
         onChange={(event) => {
           if (event.target.files) void handleFiles(event.target.files);
@@ -346,7 +444,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
             onClick={() => void load()}
             disabled={refreshing}
             className="px-3 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
-            title="تحديث المكتبة من الخادم"
+            title={demoMode ? 'تحديث المكتبة من التخزين المحلي' : 'تحديث المكتبة من الخادم'}
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             <span>تحديث</span>
@@ -376,6 +474,34 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
           )}
         </div>
       </div>
+
+      {/* Temporary trial store: always visible, never disguised as real data */}
+      {demoMode && (
+        <div
+          role="status"
+          className="p-4 rounded-xl border-2 border-amber-400 bg-amber-50 text-amber-950 text-xs leading-relaxed flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3"
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
+            <div>
+              <p className="font-black">وضع تجربة مؤقت — بيانات محلية على هذا المتصفح فقط</p>
+              <p className="mt-1 font-semibold">
+                لا يوجد اتصال بالخادم الآن؛ المستندات والقوالب والنماذج المعبأة تُخزَّن في IndexedDB
+                داخل هذا المتصفح ولا تُرسل لأي جهة. الملفات المدعومة هنا: PDF والصور فقط (تحويل
+                Word/Excel يحتاج الخادم). هذه البيانات ليست بيانات الشركة الرسمية.
+              </p>
+            </div>
+          </div>
+          {editor && store.reset && (
+            <button
+              onClick={() => void handleResetDemo()}
+              className="shrink-0 px-3 py-2 bg-white hover:bg-amber-100 text-amber-900 border border-amber-400 rounded-lg font-bold"
+            >
+              مسح بيانات التجربة
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Notices */}
       {upload && (
@@ -480,7 +606,9 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
                   اسحب مستند الشركة هنا أو اضغط للاختيار
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  PDF · Word · Excel · PNG · JPEG — بحد أقصى {MAX_UPLOAD_MB} ميجابايت
+                  {demoMode
+                    ? `PDF · PNG · JPEG · WebP — بحد أقصى ${MAX_UPLOAD_MB} ميجابايت (وضع التجربة)`
+                    : `PDF · Word · Excel · PNG · JPEG — بحد أقصى ${MAX_UPLOAD_MB} ميجابايت`}
                 </p>
               </div>
             )}
@@ -516,29 +644,14 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      <a
-                        href={`${(import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api'}/forms/files/${file.id}/download`}
-                        onClick={async (event) => {
-                          // The endpoint needs a Bearer token, so download the blob manually.
-                          event.preventDefault();
-                          try {
-                            const blob = await api.downloadFormFile(file.id);
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = file.originalName;
-                            link.click();
-                            window.setTimeout(() => URL.revokeObjectURL(url), 10000);
-                          } catch (downloadError) {
-                            setError(messageOf(downloadError, 'تعذر تنزيل الملف.'));
-                          }
-                        }}
+                      <button
+                        onClick={() => void handleDownloadFile(file)}
                         className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
                         title="تنزيل نسخة من المستند"
                         aria-label={`تنزيل ${file.originalName}`}
                       >
                         <Download className="w-4 h-4" />
-                      </a>
+                      </button>
                       {editor && (
                         <button
                           onClick={() => setPendingDeleteFile(file)}
@@ -605,6 +718,14 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          onClick={() => openFiller(template)}
+                          className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg"
+                          title="تعبئة النموذج وطباعته"
+                          aria-label={`تعبئة ${template.name}`}
+                        >
+                          <Printer className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => openPreviewForTemplate(template)}
                           className="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg"
                           title="معاينة القالب"
@@ -649,7 +770,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
 
             <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 leading-relaxed">
               قالب النموذج = المستند الأصلي + حقول مرتبطة ببيانات الموظف/الإجازة/المأمورية. اضغط أيقونة
-              تصميم الحقول بجوار القالب لتحديد أماكنها فوق المستند الأصلي.
+              تصميم الحقول لتحديد أماكنها، ثم أيقونة الطباعة لتعبئتها وطبعها على A4.
             </div>
           </section>
         </div>
@@ -660,6 +781,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
         <FormPreviewModal
           file={preview.file}
           template={preview.template}
+          loadBlob={store.downloadFile}
           onClose={() => setPreview(null)}
         />
       )}
@@ -670,6 +792,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
           state={templateModal}
           files={files}
           categories={categories}
+          store={store}
           onClose={() => setTemplateModal(null)}
           onSaved={(saved, mode) => {
             setTemplates((current) =>
@@ -693,6 +816,8 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
         <FormDesigner
           template={designer}
           file={fileById.get(designer.fileId)!}
+          store={store}
+          loadBlob={store.downloadFile}
           onClose={() => setDesigner(null)}
           onSaved={(saved) => {
             setTemplates((current) =>
@@ -701,6 +826,26 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
             setDesigner(null);
             setNotice(
               `تم حفظ ${saved.fields.length} حقل على القالب «${saved.name}».`,
+            );
+          }}
+        />
+      )}
+
+      {/* Fill + print */}
+      {filler && fileById.get(filler.fileId) && (
+        <FormFiller
+          template={filler}
+          file={fileById.get(filler.fileId)!}
+          store={store}
+          employees={employees}
+          leaves={leaves}
+          permits={permits}
+          missions={missions}
+          canSave={editor}
+          onClose={() => setFiller(null)}
+          onSaved={(submission: FormSubmission) => {
+            setNotice(
+              `تم حفظ النموذج المعبأ لـ «${filler.name}» (رقم ${submission.id.slice(0, 8)}).`,
             );
           }}
         />
@@ -737,10 +882,12 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
 function FormPreviewModal({
   file,
   template,
+  loadBlob,
   onClose,
 }: {
   file: FormFile;
   template?: FormTemplate;
+  loadBlob: (fileId: string) => Promise<Blob>;
   onClose: () => void;
 }) {
   const [page, setPage] = useState(1);
@@ -829,6 +976,7 @@ function FormPreviewModal({
             page={page}
             zoom={zoom}
             fields={template?.fields || []}
+            loadBlob={loadBlob}
             onPageCount={(count) => {
               setPageCount(Math.max(1, count));
               setPage((current) => Math.min(current, Math.max(1, count)));
@@ -856,6 +1004,7 @@ function TemplateFormModal({
   state,
   files,
   categories,
+  store,
   onClose,
   onSaved,
   onError,
@@ -863,6 +1012,7 @@ function TemplateFormModal({
   state: TemplateModalState;
   files: FormFile[];
   categories: string[];
+  store: FormStore;
   onClose: () => void;
   onSaved: (template: FormTemplate, mode: 'create' | 'edit') => void;
   onError: (message: string) => void;
@@ -890,14 +1040,14 @@ function TemplateFormModal({
     setFormError(null);
     try {
       if (editing) {
-        const saved = await api.updateFormTemplate(editing.id, {
+        const saved = await store.updateTemplate(editing.id, {
           name: name.trim(),
           category: category.trim(),
           description: description.trim(),
         });
         onSaved(saved, 'edit');
       } else {
-        const saved = await api.createFormTemplate({
+        const saved = await store.createTemplate({
           name: name.trim(),
           category: category.trim(),
           description: description.trim(),

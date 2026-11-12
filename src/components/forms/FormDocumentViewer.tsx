@@ -41,6 +41,15 @@ export interface FormDocumentViewerProps {
   pageRef?: Ref<HTMLDivElement>;
   /** Extra absolutely-positioned layer inside the page (design handles…). */
   overlay?: ReactNode;
+  /**
+   * Blob loader. Defaults to the authenticated API download; the demo store
+   * and the print sheet inject their own loader.
+   */
+  loadBlob?: (fileId: string) => Promise<Blob>;
+  /** Force a CSS width (A4 print = 794px) instead of deriving it from `zoom`. */
+  fixedWidth?: number;
+  /** Called after the page was painted (used to wait before `window.print()`). */
+  onRendered?: () => void;
 }
 
 /**
@@ -49,10 +58,13 @@ export interface FormDocumentViewerProps {
  */
 const blobCache = new Map<string, Blob>();
 
-async function getDocumentBlob(fileId: string): Promise<Blob> {
+async function getDocumentBlob(
+  fileId: string,
+  loader: (fileId: string) => Promise<Blob>,
+): Promise<Blob> {
   const cached = blobCache.get(fileId);
   if (cached) return cached;
-  const blob = await api.downloadFormFile(fileId);
+  const blob = await loader(fileId);
   if (blobCache.size >= 6) blobCache.clear();
   blobCache.set(fileId, blob);
   return blob;
@@ -69,11 +81,18 @@ export function FormDocumentViewer({
   onPageCount,
   pageRef,
   overlay,
+  loadBlob,
+  fixedWidth,
+  onRendered,
 }: FormDocumentViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
   const pageCountCallbackRef = useRef(onPageCount);
   pageCountCallbackRef.current = onPageCount;
+  const loadBlobRef = useRef(loadBlob);
+  loadBlobRef.current = loadBlob;
+  const onRenderedRef = useRef(onRendered);
+  onRenderedRef.current = onRendered;
 
   const [source, setSource] = useState<Source | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -97,7 +116,8 @@ export function FormDocumentViewer({
 
     (async () => {
       try {
-        const blob = await getDocumentBlob(file.id);
+        const loader = loadBlobRef.current ?? api.downloadFormFile;
+        const blob = await getDocumentBlob(file.id, loader);
         if (cancelled) return;
 
         if (blob.type.startsWith('image/')) {
@@ -151,10 +171,11 @@ export function FormDocumentViewer({
         if (cancelled) return;
 
         const base = pdfPage.getViewport({ scale: 1 });
-        const cssWidth = Math.round(base.width * zoom);
-        const cssHeight = Math.round(base.height * zoom);
+        const cssWidth = fixedWidth ? Math.round(fixedWidth) : Math.round(base.width * zoom);
+        const scale = cssWidth / base.width;
+        const cssHeight = Math.round(base.height * scale);
         const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
-        const viewport = pdfPage.getViewport({ scale: zoom * pixelRatio });
+        const viewport = pdfPage.getViewport({ scale: scale * pixelRatio });
 
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -175,6 +196,7 @@ export function FormDocumentViewer({
         } catch (error) {
           if ((error as Error)?.name !== 'RenderingCancelledException') throw error;
         }
+        if (!cancelled) onRenderedRef.current?.();
       } catch (error) {
         if (cancelled) return;
         if ((error as Error)?.name === 'RenderingCancelledException') return;
@@ -187,7 +209,7 @@ export function FormDocumentViewer({
       cancelled = true;
       renderTaskRef.current?.cancel();
     };
-  }, [source, page, zoom]);
+  }, [source, page, zoom, fixedWidth]);
 
   const handleValueChange = useCallback(
     (key: string, value: string) => onValuesChange?.(key, value),
@@ -233,11 +255,14 @@ export function FormDocumentViewer({
             onLoad={(event) => {
               const image = event.currentTarget;
               if (!image.naturalWidth) return;
-              const width = Math.round(A4_WIDTH_PX * zoom);
+              const width = fixedWidth
+                ? Math.round(fixedWidth)
+                : Math.round(A4_WIDTH_PX * zoom);
               setPageBox({
                 width,
                 height: Math.round((width * image.naturalHeight) / image.naturalWidth),
               });
+              onRenderedRef.current?.();
             }}
           />
         ) : (

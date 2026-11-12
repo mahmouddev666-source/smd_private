@@ -30,7 +30,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { FormFieldPlacement, FormTemplate, FormFile } from '../../types';
-import * as api from '../../services/apiClient';
+import { FormStore } from '../../services/formStore';
 import { BINDING_GROUPS, bindingLabel, isKnownBinding } from '../../utils/formBindings';
 import {
   MAX_FIELDS,
@@ -44,6 +44,10 @@ import { FormDocumentViewer } from './FormDocumentViewer';
 interface FormDesignerProps {
   template: FormTemplate;
   file: FormFile;
+  /** Active storage (API server or the temporary browser demo store). */
+  store: FormStore;
+  /** Loads the original document from the active store (API or demo). */
+  loadBlob?: (fileId: string) => Promise<Blob>;
   onClose: () => void;
   onSaved: (template: FormTemplate) => void;
 }
@@ -83,6 +87,8 @@ function defaultPlacement(index: number, page: number): Omit<FormFieldPlacement,
 export const FormDesigner: React.FC<FormDesignerProps> = ({
   template,
   file,
+  store,
+  loadBlob,
   onClose,
   onSaved,
 }) => {
@@ -276,10 +282,10 @@ export const FormDesigner: React.FC<FormDesignerProps> = ({
     setSaving(true);
     setError(null);
     try {
-      const saved = await api.updateFormTemplate(template.id, { fields: cleaned });
+      const saved = await store.updateTemplate(template.id, { fields: cleaned });
       onSaved(saved);
     } catch (saveError) {
-      setError(messageOf(saveError, 'تعذر حفظ حقول القالب على الخادم.'));
+      setError(messageOf(saveError, 'تعذر حفظ حقول القالب.'));
     } finally {
       setSaving(false);
     }
@@ -462,6 +468,7 @@ export const FormDesigner: React.FC<FormDesignerProps> = ({
                 page={page}
                 zoom={zoom}
                 fields={[]}
+                loadBlob={loadBlob}
                 pageRef={setPageEl}
                 overlay={overlay}
                 onPageCount={(count) => {

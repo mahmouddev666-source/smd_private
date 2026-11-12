@@ -59,14 +59,16 @@ test.describe('SMD-HR baseline', () => {
     }
   });
 
-  test('forms tab is honest about needing the server in demo mode', async ({page}) => {
+  test('forms tab shows the temporary browser demo instead of faking a server', async ({page}) => {
     await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
     await page.getByRole('button', {name: 'النماذج والمستندات'}).first().click();
 
-    await expect(page.getByRole('heading', {name: 'مكتبة مستندات الشركة'})).toBeVisible();
-    await expect(page.getByText(/مكتبة المستندات تعمل على الخادم فقط/)).toBeVisible();
-    // No fake upload UI while the API is unreachable.
-    await expect(page.getByRole('button', {name: 'رفع مستند'})).toHaveCount(0);
+    await expect(page.getByRole('heading', {name: 'مكتبة مستندات الشركة ونماذجها'})).toBeVisible();
+    // The trial store is clearly labelled and upload is possible locally.
+    await expect(page.getByText(/وضع تجربة مؤقت/)).toBeVisible();
+    await expect(page.getByRole('button', {name: 'رفع مستند'})).toBeVisible();
+    // The production "server only" message must not appear in this build.
+    await expect(page.getByText(/وضع التجربة المحلي معطّل في نسخة الإنتاج/)).toHaveCount(0);
   });
 
   test('the overtime calculator produces a result', async ({page}) => {
