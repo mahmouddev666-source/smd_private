@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Crosshair,
   Download,
   Eye,
   FileImage,
@@ -35,6 +36,7 @@ import { FormFile, FormTemplate, UserSession } from '../types';
 import * as api from '../services/apiClient';
 import { canEdit } from '../utils/roles';
 import { FormDocumentViewer } from './forms/FormDocumentViewer';
+import { FormDesigner } from './forms/FormDesigner';
 
 const MAX_UPLOAD_MB = 20;
 
@@ -129,6 +131,7 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
   const [pendingDeleteFile, setPendingDeleteFile] = useState<FormFile | null>(null);
   const [pendingDeleteTemplate, setPendingDeleteTemplate] = useState<FormTemplate | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [designer, setDesigner] = useState<FormTemplate | null>(null);
   const [templateModal, setTemplateModal] = useState<TemplateModalState | null>(null);
 
   // -------------------------------------------------------------------------
@@ -162,17 +165,18 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
 
   // Close any open overlay with Escape.
   useEffect(() => {
-    if (!preview && !templateModal && !pendingDeleteFile && !pendingDeleteTemplate) return;
+    if (!preview && !designer && !templateModal && !pendingDeleteFile && !pendingDeleteTemplate) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setPreview(null);
+      setDesigner(null);
       setTemplateModal(null);
       setPendingDeleteFile(null);
       setPendingDeleteTemplate(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [preview, templateModal, pendingDeleteFile, pendingDeleteTemplate]);
+  }, [preview, designer, templateModal, pendingDeleteFile, pendingDeleteTemplate]);
 
   const fileById = useMemo(
     () => new Map(files.map((file) => [file.id, file])),
@@ -267,6 +271,14 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
       return;
     }
     setPreview({ file, template });
+  };
+
+  const openDesigner = (template: FormTemplate) => {
+    if (!fileById.get(template.fileId)) {
+      setError('ملف هذا القالب غير موجود في المكتبة. أعد رفع المستند قبل تصميم الحقول.');
+      return;
+    }
+    setDesigner(template);
   };
 
   // -------------------------------------------------------------------------
@@ -603,6 +615,14 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
                         {editor && (
                           <>
                             <button
+                              onClick={() => openDesigner(template)}
+                              className="p-1.5 text-blue-800 hover:bg-blue-50 rounded-lg"
+                              title="تصميم حقول القالب على المستند"
+                              aria-label={`تصميم حقول ${template.name}`}
+                            >
+                              <Crosshair className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => setTemplateModal({ mode: 'edit', template })}
                               className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
                               title="تعديل بيانات القالب"
@@ -628,8 +648,8 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
             )}
 
             <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 leading-relaxed">
-              قالب النموذج = المستند الأصلي + حقول مرتبطة ببيانات الموظف/الإجازة/المأمورية. تصميم
-              الحقول وتعبئتها يتم من شاشة «تعبئة النماذج».
+              قالب النموذج = المستند الأصلي + حقول مرتبطة ببيانات الموظف/الإجازة/المأمورية. اضغط أيقونة
+              تصميم الحقول بجوار القالب لتحديد أماكنها فوق المستند الأصلي.
             </div>
           </section>
         </div>
@@ -660,11 +680,29 @@ export const FormsManager: React.FC<FormsManagerProps> = ({ user, apiEnabled }) 
             setTemplateModal(null);
             setNotice(
               mode === 'create'
-                ? `تم إنشاء القالب «${saved.name}». أضف حقوله من شاشة تعبئة النماذج.`
+                ? `تم إنشاء القالب «${saved.name}». استخدم أيقونة تصميم الحقول لإضافة الحقول.`
                 : `تم تحديث القالب «${saved.name}».`,
             );
           }}
           onError={(message) => setError(message)}
+        />
+      )}
+
+      {/* Field designer */}
+      {designer && fileById.get(designer.fileId) && (
+        <FormDesigner
+          template={designer}
+          file={fileById.get(designer.fileId)!}
+          onClose={() => setDesigner(null)}
+          onSaved={(saved) => {
+            setTemplates((current) =>
+              current.map((row) => (row.id === saved.id ? saved : row)),
+            );
+            setDesigner(null);
+            setNotice(
+              `تم حفظ ${saved.fields.length} حقل على القالب «${saved.name}».`,
+            );
+          }}
         />
       )}
 
@@ -975,8 +1013,8 @@ function TemplateFormModal({
 
           {!editing && (
             <p className="text-[11px] text-slate-500 bg-blue-50 border border-blue-200 rounded-lg p-2.5 leading-relaxed">
-              يُنشأ القالب بدون حقول. بعد الحفظ افتح شاشة «تعبئة النماذج» لتحديد أماكن الحقول فوق
-              المستند الأصلي.
+              يُنشأ القالب بدون حقول. بعد الحفظ اضغط أيقونة تصميم الحقول بجوار القالب لتحديد أماكن
+              الحقول فوق المستند الأصلي.
             </p>
           )}
 

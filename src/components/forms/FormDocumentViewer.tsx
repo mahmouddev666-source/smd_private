@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode, Ref } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { AlertTriangle, Loader2 } from 'lucide-react';
@@ -37,6 +37,25 @@ export interface FormDocumentViewerProps {
   interactive?: boolean;
   onValuesChange?: (key: string, value: string) => void;
   onPageCount?: (count: number) => void;
+  /** Ref to the A4 page box; used by the designer to convert pixels to %. */
+  pageRef?: Ref<HTMLDivElement>;
+  /** Extra absolutely-positioned layer inside the page (design handles…). */
+  overlay?: ReactNode;
+}
+
+/**
+ * Small in-memory blob cache so flipping pages / rendering the print pages does
+ * not re-download the same document several times.
+ */
+const blobCache = new Map<string, Blob>();
+
+async function getDocumentBlob(fileId: string): Promise<Blob> {
+  const cached = blobCache.get(fileId);
+  if (cached) return cached;
+  const blob = await api.downloadFormFile(fileId);
+  if (blobCache.size >= 6) blobCache.clear();
+  blobCache.set(fileId, blob);
+  return blob;
 }
 
 export function FormDocumentViewer({
@@ -48,6 +67,8 @@ export function FormDocumentViewer({
   interactive = false,
   onValuesChange,
   onPageCount,
+  pageRef,
+  overlay,
 }: FormDocumentViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
@@ -76,7 +97,7 @@ export function FormDocumentViewer({
 
     (async () => {
       try {
-        const blob = await api.downloadFormFile(file.id);
+        const blob = await getDocumentBlob(file.id);
         if (cancelled) return;
 
         if (blob.type.startsWith('image/')) {
@@ -200,6 +221,7 @@ export function FormDocumentViewer({
   return (
     <div className="flex justify-center">
       <div
+        ref={pageRef}
         className="relative bg-white shadow-xl border border-slate-300 overflow-hidden"
         style={{ width: pageBox.width, height: pageBox.height }}
       >
@@ -268,6 +290,8 @@ export function FormDocumentViewer({
             </div>
           );
         })}
+
+        {overlay}
       </div>
     </div>
   );
