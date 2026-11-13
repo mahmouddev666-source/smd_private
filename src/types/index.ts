@@ -232,8 +232,40 @@ export interface ZktecoSyncLog {
   insertedCount: number;
   duplicateCount: number;
   unknownCount: number;
+  attendanceCreated?: number;
+  attendanceUpdated?: number;
   errorMessage: string;
   isDemo?: boolean;
+}
+
+export interface UnknownPunch {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  enrollNumber: string;
+  punchTime: string;
+  punchType: string;
+  verifyMode: string;
+  resolvedEmployeeId?: string | null;
+  isIgnored: boolean;
+  isDemo?: boolean;
+}
+
+export interface PunchResolution {
+  punch: {
+    id: string;
+    deviceId: string;
+    enrollNumber: string;
+    punchTime: string;
+    punchType: string;
+    verifyMode: string;
+    resolvedEmployeeId?: string | null;
+    isIgnored: boolean;
+    isDemo?: boolean;
+  };
+  attendanceCreated: boolean;
+  attendanceUpdated: boolean;
+  message: string;
 }
 
 export interface BiometricLogEntry {
@@ -243,6 +275,8 @@ export interface BiometricLogEntry {
   timestamp: string;
   verifyMode: 'بصمة إصبع' | 'بصمة وجه' | 'كارت RFID' | 'كلمة سر';
   punchType: 'دخول' | 'خروج' | 'خروج مؤقت (إذن)' | 'عودة من إذن';
+  /** Demo mode only: set when HR dismisses an unknown punch. */
+  ignored?: boolean;
   isDemo?: boolean;
 }
 

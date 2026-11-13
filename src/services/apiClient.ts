@@ -21,7 +21,9 @@ import {
   LeaveRecord,
   MissionRecord,
   PermitRecord,
+  PunchResolution,
   ShiftType,
+  UnknownPunch,
   UserRole,
   UserSession,
   ZKTecoDevice,
@@ -320,6 +322,8 @@ interface SyncLogDto {
   inserted_count: number;
   duplicate_count: number;
   unknown_count: number;
+  attendance_created: number;
+  attendance_updated: number;
   error_message: string;
 }
 
@@ -330,7 +334,20 @@ interface PunchDto {
   punch_time: string;
   punch_type: string;
   verify_mode: string;
+  resolved_employee_id: string | null;
+  is_ignored: boolean;
   is_demo: boolean;
+}
+
+interface UnknownPunchDto extends PunchDto {
+  device_name: string;
+}
+
+interface PunchResolutionDto {
+  punch: PunchDto;
+  attendance_created: boolean;
+  attendance_updated: boolean;
+  message: string;
 }
 
 interface PageDto<T> {
@@ -579,6 +596,8 @@ export function mapSyncLog(dto: SyncLogDto): ZktecoSyncLog {
     insertedCount: dto.inserted_count,
     duplicateCount: dto.duplicate_count,
     unknownCount: dto.unknown_count,
+    attendanceCreated: dto.attendance_created,
+    attendanceUpdated: dto.attendance_updated,
     errorMessage: dto.error_message,
   };
 }
@@ -609,6 +628,40 @@ export function mapPunch(dto: PunchDto): BiometricLogEntry {
       ? (dto.punch_type as BiometricLogEntry['punchType'])
       : 'دخول',
     isDemo: dto.is_demo,
+  };
+}
+
+export function mapUnknownPunch(dto: UnknownPunchDto): UnknownPunch {
+  return {
+    id: dto.id,
+    deviceId: dto.device_id,
+    deviceName: dto.device_name,
+    enrollNumber: dto.enroll_number,
+    punchTime: formatSyncTime(dto.punch_time),
+    punchType: dto.punch_type,
+    verifyMode: dto.verify_mode,
+    resolvedEmployeeId: dto.resolved_employee_id,
+    isIgnored: dto.is_ignored,
+    isDemo: dto.is_demo,
+  };
+}
+
+function mapPunchResolution(dto: PunchResolutionDto): PunchResolution {
+  return {
+    punch: {
+      id: dto.punch.id,
+      deviceId: dto.punch.device_id,
+      enrollNumber: dto.punch.enroll_number,
+      punchTime: formatSyncTime(dto.punch.punch_time),
+      punchType: dto.punch.punch_type,
+      verifyMode: dto.punch.verify_mode,
+      resolvedEmployeeId: dto.punch.resolved_employee_id,
+      isIgnored: dto.punch.is_ignored,
+      isDemo: dto.punch.is_demo,
+    },
+    attendanceCreated: dto.attendance_created,
+    attendanceUpdated: dto.attendance_updated,
+    message: dto.message,
   };
 }
 
@@ -713,6 +766,33 @@ export async function fetchSyncLogs(deviceId?: string): Promise<ZktecoSyncLog[]>
   return rows.map(mapSyncLog);
 }
 
+/** Punches whose PIN matches no employee and were not ignored yet. */
+export async function fetchUnknownPunches(): Promise<UnknownPunch[]> {
+  const rows = await request<UnknownPunchDto[]>('/devices/unknown-punches');
+  return rows.map(mapUnknownPunch);
+}
+
+/** Link an unknown punch to an employee and re-run attendance mapping. */
+export async function assignUnknownPunch(
+  punchId: string,
+  employeeId: string,
+): Promise<PunchResolution> {
+  const dto = await request<PunchResolutionDto>(
+    `/devices/punches/${encodeURIComponent(punchId)}/assign`,
+    { method: 'POST', body: { employee_id: employeeId } },
+  );
+  return mapPunchResolution(dto);
+}
+
+/** Dismiss an unknown punch so it leaves the report without touching data. */
+export async function ignoreUnknownPunch(punchId: string): Promise<PunchResolution> {
+  const dto = await request<PunchResolutionDto>(
+    `/devices/punches/${encodeURIComponent(punchId)}/ignore`,
+    { method: 'POST' },
+  );
+  return mapPunchResolution(dto);
+}
+
 export interface HrSnapshot {
   employees: Employee[];
   attendance: AttendanceRecord[];
@@ -723,21 +803,32 @@ export interface HrSnapshot {
   devices: ZKTecoDevice[];
   biometricLogs: BiometricLogEntry[];
   syncLogs: ZktecoSyncLog[];
+  unknownPunches: UnknownPunch[];
 }
 
 /** One round of parallel reads. Attendance needs employees for hourly rates. */
 export async function fetchAll(): Promise<HrSnapshot> {
-  const [employees, leaves, leaveBalances, permits, missions, devices, biometricLogs, syncLogs] =
-    await Promise.all([
-      fetchEmployees(),
-      fetchLeaves(),
-      fetchLeaveBalances(),
-      fetchPermits(),
-      fetchMissions(),
-      fetchDevices(),
-      fetchBiometricLogs(),
-      fetchSyncLogs(),
-    ]);
+  const [
+    employees,
+    leaves,
+    leaveBalances,
+    permits,
+    missions,
+    devices,
+    biometricLogs,
+    syncLogs,
+    unknownPunches,
+  ] = await Promise.all([
+    fetchEmployees(),
+    fetchLeaves(),
+    fetchLeaveBalances(),
+    fetchPermits(),
+    fetchMissions(),
+    fetchDevices(),
+    fetchBiometricLogs(),
+    fetchSyncLogs(),
+    fetchUnknownPunches(),
+  ]);
   const attendance = await fetchAttendance(employees);
   return {
     employees,
@@ -749,6 +840,7 @@ export async function fetchAll(): Promise<HrSnapshot> {
     devices,
     biometricLogs,
     syncLogs,
+    unknownPunches,
   };
 }
 

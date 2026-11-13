@@ -40,6 +40,12 @@ export function summarizeSyncResult(log: ZktecoSyncLog): string {
   ];
   if (log.duplicateCount > 0) parts.push(`تم تجاهل ${log.duplicateCount} حركة مكررة`);
   if (log.unknownCount > 0) parts.push(`${log.unknownCount} بصمة لكود موظف غير مسجل`);
+  if ((log.attendanceCreated ?? 0) > 0) {
+    parts.push(`أُنشئ ${log.attendanceCreated} سجل حضور`);
+  }
+  if ((log.attendanceUpdated ?? 0) > 0) {
+    parts.push(`حُدّث ${log.attendanceUpdated} سجل حضور`);
+  }
   return `${parts.join(' — ')}.`;
 }
 

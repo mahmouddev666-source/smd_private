@@ -74,6 +74,8 @@ class SyncLogOut(ORMModel):
     inserted_count: int
     duplicate_count: int
     unknown_count: int
+    attendance_created: int
+    attendance_updated: int
     error_message: str
 
     @classmethod
@@ -88,6 +90,8 @@ class SyncLogOut(ORMModel):
             inserted_count=log.inserted_count,
             duplicate_count=log.duplicate_count,
             unknown_count=log.unknown_count,
+            attendance_created=log.attendance_created,
+            attendance_updated=log.attendance_updated,
             error_message=log.error_message,
         )
 
@@ -99,6 +103,8 @@ class PunchOut(ORMModel):
     punch_time: datetime
     punch_type: str
     verify_mode: str
+    resolved_employee_id: str | None
+    is_ignored: bool
     is_demo: bool
 
     @classmethod
@@ -110,5 +116,29 @@ class PunchOut(ORMModel):
             punch_time=punch.punch_time,
             punch_type=punch.punch_type,
             verify_mode=punch.verify_mode,
+            resolved_employee_id=punch.resolved_employee_id,
+            is_ignored=punch.ignored_at is not None,
             is_demo=punch.is_demo,
         )
+
+
+class UnknownPunchOut(PunchOut):
+    """A punch whose PIN is not linked to any employee yet."""
+
+    device_name: str
+
+    @classmethod
+    def from_row_with_device(cls, punch: BiometricPunch, device_name: str) -> "UnknownPunchOut":
+        base = PunchOut.from_row(punch)
+        return cls(**base.model_dump(), device_name=device_name)
+
+
+class PunchAssign(BaseModel):
+    employee_id: str = Field(min_length=1, max_length=32)
+
+
+class PunchResolutionOut(BaseModel):
+    punch: PunchOut
+    attendance_created: bool
+    attendance_updated: bool
+    message: str

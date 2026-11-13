@@ -102,6 +102,37 @@ test.describe('SMD-HR baseline', () => {
     await expect(page.getByText(/Communication Key: محفوظ محليًا/).first()).toBeVisible();
   });
 
+  test('ZKTeco unknown biometrics can be assigned to an employee', async ({page}) => {
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await page.getByRole('button', {name: 'أجهزة ZKTeco'}).first().click();
+    await page.getByRole('tab', {name: /البصمات غير المعروفة/}).click();
+
+    await expect(
+      page.getByRole('heading', {name: 'تقرير البصمات غير المعروفة (Unknown Biometrics)'}),
+    ).toBeVisible();
+    const row = page.getByRole('row', {name: /7777/});
+    await expect(row).toBeVisible();
+
+    await page.getByLabel(/اختيار الموظف للبصمة 7777/).selectOption({index: 1});
+    await row.getByRole('button', {name: 'ربط'}).click();
+
+    await expect(page.getByText(/تم ربط البصمة بالموظف/)).toBeVisible();
+    await expect(page.getByText('لا توجد بصمات غير معروفة حاليًا')).toBeVisible();
+  });
+
+  test('ZKTeco unknown biometrics can be ignored', async ({page}) => {
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await page.getByRole('button', {name: 'أجهزة ZKTeco'}).first().click();
+    await page.getByRole('tab', {name: /البصمات غير المعروفة/}).click();
+
+    const row = page.getByRole('row', {name: /7777/});
+    await expect(row).toBeVisible();
+    await row.getByRole('button', {name: 'تجاهل'}).click();
+
+    await expect(page.getByText(/تم تجاهل البصمة/)).toBeVisible();
+    await expect(page.getByText('لا توجد بصمات غير معروفة حاليًا')).toBeVisible();
+  });
+
   test('forms tab shows the temporary browser demo instead of faking a server', async ({page}) => {
     await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
     await page.getByRole('button', {name: 'النماذج والمستندات'}).first().click();

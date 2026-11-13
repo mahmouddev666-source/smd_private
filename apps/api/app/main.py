@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.errors import AppError
 from app.routers import api_router
+from app.services import scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("smd_hr")
@@ -54,8 +55,15 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api")
 
     @app.on_event("startup")
-    def log_startup() -> None:
+    async def on_startup() -> None:
         logger.info("SMD-HR API started (env=%s, tz=%s)", settings.app_env, settings.tz)
+        # Non-blocking background loop: every terminal is polled in a worker
+        # thread. Disabled automatically under APP_ENV=test.
+        scheduler.start_scheduler()
+
+    @app.on_event("shutdown")
+    async def on_shutdown() -> None:
+        await scheduler.stop_scheduler()
 
     return app
 

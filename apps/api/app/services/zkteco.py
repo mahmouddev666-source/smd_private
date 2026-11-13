@@ -28,6 +28,7 @@ from app.db.base import utcnow
 from app.models.device import BiometricPunch, ZktecoDevice, ZktecoSyncLog
 from app.models.employee import Employee
 from app.models.user import User
+from app.services.attendance_processor import process_device_punches
 from app.services.audit import record_audit
 from app.utils.ids import new_id
 
@@ -136,7 +137,7 @@ class PyzkConnector:
         self._ip_address = ip_address
         self._port = port
         self._comm_key = comm_key
-        self._timeout = settings.zkteco_timeout_seconds if timeout is None else timeout
+        self._timeout = settings.zk_timeout_seconds if timeout is None else timeout
 
     def _open(self):
         try:
@@ -346,15 +347,19 @@ def test_device(
 
 
 def sync_device(
-    db: Session, device: ZktecoDevice, actor: User, factory: ConnectorFactory
+    db: Session, device: ZktecoDevice, actor: User | None, factory: ConnectorFactory
 ) -> ZktecoSyncLog:
-    """Pull punches with retries and persist a sync log even when it fails."""
+    """Pull punches with retries and persist a sync log even when it fails.
+
+    `actor` is `None` for the background scheduler; audit rows then record
+    "system" so automatic runs stay traceable without a fake user.
+    """
     log = ZktecoSyncLog(
         id=new_id(),
         device_id=device.id,
         status="running",
         started_at=utcnow(),
-        triggered_by=actor.id,
+        triggered_by=actor.id if actor else None,
         is_demo=device.is_demo,
     )
     db.add(log)
@@ -367,16 +372,24 @@ def sync_device(
         punches = _with_retry(lambda: factory(device).fetch_punches(since=since))
         assert isinstance(punches, list)
         stats = insert_punches(db, device, punches)
+        processing = process_device_punches(db, device, actor, since=since)
         log.status = "success"
         log.fetched_count = stats.fetched
         log.inserted_count = stats.inserted
         log.duplicate_count = stats.duplicates
         log.unknown_count = stats.unknown
+        log.attendance_created = processing.created
+        log.attendance_updated = processing.updated
         device.status = "connected"
         device.last_sync_at = utcnow()
         record_audit(
             db, actor=actor, action="sync", entity="device", entity_id=device.id,
-            after={"inserted": stats.inserted, "duplicates": stats.duplicates},
+            after={
+                "inserted": stats.inserted,
+                "duplicates": stats.duplicates,
+                "attendance_created": processing.created,
+                "attendance_updated": processing.updated,
+            },
         )
     except ConnectorError as exc:
         log.status = "failed"

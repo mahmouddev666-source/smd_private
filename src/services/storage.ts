@@ -60,7 +60,7 @@ const KEYS = {
  * Bumping this value invalidates older local datasets (e.g. the old `1001+`
  * demo codes). `ensureDataVersion()` then reseeds demo data once.
  */
-const CURRENT_DATA_VERSION = '2';
+const CURRENT_DATA_VERSION = '3';
 const DEMO_EMPLOYEE_THRESHOLD = 9000;
 
 function cloneFallback<T>(value: T): T {
@@ -404,6 +404,17 @@ export const StorageService = {
         timestamp: `${today} 16:05:30`,
         verifyMode: 'بصمة وجه',
         punchType: 'خروج',
+        isDemo: true,
+      },
+      {
+        // Deliberately unknown PIN: exercises the "بصمات غير معروفة" report in
+        // demo mode. HR can assign it to an employee or ignore it.
+        id: 'LOG-DEMO-UNKNOWN-01',
+        deviceId: 'ZK-01',
+        enrollNumber: '7777',
+        timestamp: `${today} 09:12:40`,
+        verifyMode: 'بصمة إصبع',
+        punchType: 'دخول',
         isDemo: true,
       },
     ]);

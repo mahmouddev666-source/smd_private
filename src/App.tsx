@@ -26,6 +26,7 @@ import {
   BiometricLogEntry,
   DeviceConnection,
   ZktecoSyncLog,
+  UnknownPunch,
   LicenseConfig,
   UserSession,
   UserRole,
@@ -78,6 +79,33 @@ function demoSessionFor(username: string, password: string): UserSession | null 
     : null;
 }
 
+/**
+ * Demo mode has no server, so the unknown-biometrics report is derived from the
+ * local punch log: any PIN that matches no employee and was not dismissed.
+ */
+function deriveDemoUnknownPunches(
+  logs: BiometricLogEntry[],
+  employees: Employee[],
+  devices: ZKTecoDevice[],
+): UnknownPunch[] {
+  const known = new Set(employees.map((employee) => employee.employeeId));
+  const deviceNames = new Map(devices.map((device) => [device.id, device.name]));
+  return logs
+    .filter((log) => !known.has(log.enrollNumber) && !log.ignored)
+    .map((log) => ({
+      id: log.id,
+      deviceId: log.deviceId,
+      deviceName: deviceNames.get(log.deviceId) || log.deviceId,
+      enrollNumber: log.enrollNumber,
+      punchTime: log.timestamp,
+      punchType: log.punchType,
+      verifyMode: log.verifyMode,
+      resolvedEmployeeId: null,
+      isIgnored: false,
+      isDemo: log.isDemo,
+    }));
+}
+
 export default function App() {
   // Session & data source
   const [mode, setMode] = useState<DataMode>('api');
@@ -97,6 +125,7 @@ export default function App() {
   const [devices, setDevices] = useState<ZKTecoDevice[]>([]);
   const [biometricLogs, setBiometricLogs] = useState<BiometricLogEntry[]>([]);
   const [syncLogs, setSyncLogs] = useState<ZktecoSyncLog[]>([]);
+  const [unknownPunches, setUnknownPunches] = useState<UnknownPunch[]>([]);
   const [license, setLicense] = useState<LicenseConfig>(() => StorageService.getLicense());
 
   // Modals & navigation helpers
@@ -113,15 +142,19 @@ export default function App() {
 
   const loadDemoSnapshot = useCallback(() => {
     StorageService.ensureDataVersion();
-    setEmployees(StorageService.getEmployees());
+    const demoEmployees = StorageService.getEmployees();
+    const demoDevices = StorageService.getDevices();
+    const demoLogs = StorageService.getBiometricLogs();
+    setEmployees(demoEmployees);
     setAttendance(StorageService.getAttendance());
     setLeaveBalances(StorageService.getLeaveBalances());
     setLeaves(StorageService.getLeaves());
     setPermits(StorageService.getPermits());
     setMissions(StorageService.getMissions());
-    setDevices(StorageService.getDevices());
-    setBiometricLogs(StorageService.getBiometricLogs());
+    setDevices(demoDevices);
+    setBiometricLogs(demoLogs);
     setSyncLogs([]);
+    setUnknownPunches(deriveDemoUnknownPunches(demoLogs, demoEmployees, demoDevices));
     setLicense(StorageService.getLicense());
   }, []);
 
@@ -136,6 +169,7 @@ export default function App() {
     setDevices(snapshot.devices);
     setBiometricLogs(snapshot.biometricLogs);
     setSyncLogs(snapshot.syncLogs);
+    setUnknownPunches(snapshot.unknownPunches);
   }, []);
 
   const refreshSnapshot = useCallback(async () => {
@@ -270,6 +304,7 @@ export default function App() {
     setDevices([]);
     setBiometricLogs([]);
     setSyncLogs([]);
+    setUnknownPunches([]);
   };
 
   // ---------------------------------------------------------------------------
@@ -438,14 +473,19 @@ export default function App() {
   const handleSyncDeviceLogs = async (deviceId: string): Promise<ZktecoSyncLog> => {
     if (mode !== 'demo') {
       const log = await api.syncDevice(deviceId);
-      const [refreshedDevices, refreshedLogs, refreshedPunches] = await Promise.all([
-        api.fetchDevices(),
-        api.fetchSyncLogs(),
-        api.fetchBiometricLogs(),
-      ]);
+      const [refreshedDevices, refreshedLogs, refreshedPunches, refreshedUnknown, refreshedAttendance] =
+        await Promise.all([
+          api.fetchDevices(),
+          api.fetchSyncLogs(),
+          api.fetchBiometricLogs(),
+          api.fetchUnknownPunches(),
+          api.fetchAttendance(employeesRef.current),
+        ]);
       setDevices(refreshedDevices);
       setSyncLogs(refreshedLogs);
       setBiometricLogs(refreshedPunches);
+      setUnknownPunches(refreshedUnknown);
+      setAttendance(refreshedAttendance);
       return log;
     }
 
@@ -552,6 +592,82 @@ export default function App() {
     };
     setSyncLogs((current) => [demoLog, ...current].slice(0, 50));
     return demoLog;
+  };
+
+  /**
+   * Unknown biometrics: link a PIN to a real employee. The server re-runs the
+   * attendance mapping for the surrounding days; demo mode rewrites the local
+   * punch and adds an attendance row.
+   */
+  const handleAssignUnknownPunch = async (
+    punchId: string,
+    employeeId: string,
+  ): Promise<string> => {
+    if (mode === 'demo') {
+      const employee = employeesRef.current.find((item) => item.employeeId === employeeId);
+      if (!employee) throw new Error('الموظف غير موجود.');
+      const logs = StorageService.getBiometricLogs();
+      const punch = logs.find((item) => item.id === punchId);
+      if (!punch) throw new Error('حركة البصمة غير موجودة.');
+
+      StorageService.saveBiometricLogs(
+        logs.map((item) =>
+          item.id === punchId ? { ...item, enrollNumber: employeeId, ignored: false } : item,
+        ),
+      );
+
+      const [day, clock] = punch.timestamp.split(' ');
+      const checkIn = (clock || '08:00').slice(0, 5);
+      const shiftType = employee.defaultShift || 'NORMAL_DAY';
+      const ot = calculateOvertime(shiftType, checkIn, checkIn, employee.hourlyRate);
+      StorageService.addAttendanceRecord({
+        employeeId: employee.employeeId,
+        date: day || localDateISO(),
+        shiftType,
+        checkIn,
+        checkOut: '',
+        workingHours: 0,
+        standardHours: ot.standardHours,
+        overtimeHoursTotal: 0,
+        dayOvertimeHours: 0,
+        nightOvertimeHours: 0,
+        dayOvertimePay: 0,
+        nightOvertimePay: 0,
+        totalOvertimePay: 0,
+        source: 'ZKTeco-Biometric',
+        deviceId: punch.deviceId,
+        status: 'حاضر',
+        notes: 'ربط بصمة غير معروفة (وضع تجريبي) — لا يوجد اتصال فعلي بالجهاز',
+        isDemo: employee.isDemo,
+      });
+      loadDemoSnapshot();
+      return `تم ربط البصمة بالموظف ${employee.name} (${employee.employeeId}) في وضع العرض التجريبي.`;
+    }
+
+    const result = await api.assignUnknownPunch(punchId, employeeId);
+    const [refreshedUnknown, refreshedAttendance] = await Promise.all([
+      api.fetchUnknownPunches(),
+      api.fetchAttendance(employeesRef.current),
+    ]);
+    setUnknownPunches(refreshedUnknown);
+    setAttendance(refreshedAttendance);
+    return result.message;
+  };
+
+  /** Dismiss an unknown punch without touching attendance. */
+  const handleIgnoreUnknownPunch = async (punchId: string): Promise<string> => {
+    if (mode === 'demo') {
+      const logs = StorageService.getBiometricLogs();
+      StorageService.saveBiometricLogs(
+        logs.map((item) => (item.id === punchId ? { ...item, ignored: true } : item)),
+      );
+      loadDemoSnapshot();
+      return 'تم تجاهل البصمة ولن تظهر في تقرير البصمات غير المعروفة.';
+    }
+
+    const result = await api.ignoreUnknownPunch(punchId);
+    setUnknownPunches(await api.fetchUnknownPunches());
+    return result.message;
   };
 
   // Open Smart Form helper from Profile Modal
@@ -741,12 +857,15 @@ export default function App() {
             devices={devices}
             biometricLogs={biometricLogs}
             syncLogs={syncLogs}
+            unknownPunches={unknownPunches}
             employees={employees}
             user={user}
             syncEnabled
             onUpdateDevice={handleUpdateDevice}
             onTestConnection={handleTestDeviceConnection}
             onSyncDeviceLogs={handleSyncDeviceLogs}
+            onAssignUnknownPunch={handleAssignUnknownPunch}
+            onIgnoreUnknownPunch={handleIgnoreUnknownPunch}
           />
         )}
 

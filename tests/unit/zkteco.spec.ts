@@ -46,6 +46,12 @@ describe('ZKTeco sync summaries', () => {
     expect(text).toContain('1 بصمة لكود موظف غير مسجل');
   });
 
+  it('reports attendance rows created and updated by the mapping', () => {
+    const text = summarizeSyncResult(log({attendanceCreated: 2, attendanceUpdated: 1}));
+    expect(text).toContain('أُنشئ 2 سجل حضور');
+    expect(text).toContain('حُدّث 1 سجل حضور');
+  });
+
   it('shows the server error message when the run fails', () => {
     expect(summarizeSyncResult(log({status: 'failed', errorMessage: 'انتهت المهلة.'}))).toBe(
       'تعذّرت المزامنة: انتهت المهلة.',

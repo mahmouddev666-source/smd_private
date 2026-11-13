@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,7 +42,22 @@ class Settings(BaseSettings):
     libreoffice_timeout_seconds: int = 120
 
     # ZKTeco connector (server-side only, never from the browser)
-    zkteco_timeout_seconds: float = 8.0
+    # Names match `.env.example` (ZK_*); the older ZKTECO_* names still work.
+    zk_sync_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ZK_SYNC_ENABLED", "ZKTECO_SYNC_ENABLED"),
+    )
+    zk_sync_interval_minutes: int = Field(
+        default=10,
+        ge=1,
+        validation_alias=AliasChoices(
+            "ZK_SYNC_INTERVAL_MINUTES", "ZKTECO_SYNC_INTERVAL_MINUTES"
+        ),
+    )
+    zk_timeout_seconds: float = Field(
+        default=8.0,
+        validation_alias=AliasChoices("ZK_TIMEOUT_SECONDS", "ZKTECO_TIMEOUT_SECONDS"),
+    )
     zkteco_max_attempts: int = 2
     zkteco_retry_delay_seconds: float = 1.0
     zkteco_sync_lookback_days: int = 7
@@ -53,6 +69,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in {"production", "prod"}
+
+    @property
+    def is_test(self) -> bool:
+        """Tests must never start the background scheduler or hit real devices."""
+        return self.app_env.lower() in {"test", "testing"}
 
 
 @lru_cache

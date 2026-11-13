@@ -52,6 +52,10 @@ class BiometricPunch(IdMixin, TimestampMixin, Base):
     punch_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     punch_type: Mapped[str] = mapped_column(String(20), nullable=False, default="دخول")
     verify_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="بصمة")
+    # Set by HR when an unknown PIN is assigned to a real employee.
+    resolved_employee_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Set by HR to dismiss a punch that does not belong to any employee.
+    ignored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
@@ -73,6 +77,8 @@ class ZktecoSyncLog(IdMixin, TimestampMixin, Base):
     inserted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     unknown_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attendance_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attendance_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     triggered_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
