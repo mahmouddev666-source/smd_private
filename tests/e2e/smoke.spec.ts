@@ -84,6 +84,24 @@ test.describe('SMD-HR baseline', () => {
     }
   });
 
+  test('ZKTeco demo mode syncs punches and labels the simulation', async ({page}) => {
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await page.getByRole('button', {name: 'أجهزة ZKTeco'}).first().click();
+
+    await expect(
+      page.getByRole('heading', {name: /إدارة أجهزة البصمة ZKTeco/}),
+    ).toBeVisible();
+
+    await page.getByRole('button', {name: 'اختبار اتصال TCP'}).first().click();
+    await expect(page.getByText(/وضع العرض التجريبي فقط/)).toBeVisible();
+
+    await page.getByRole('button', {name: 'سحب الحركات الآن'}).first().click();
+    await expect(page.getByText(/تم سحب 4 حركة/)).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'سجل المزامنة (Sync Logs)'})).toBeVisible();
+    // The communication key is never rendered as a raw value.
+    await expect(page.getByText(/Communication Key: محفوظ محليًا/).first()).toBeVisible();
+  });
+
   test('forms tab shows the temporary browser demo instead of faking a server', async ({page}) => {
     await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
     await page.getByRole('button', {name: 'النماذج والمستندات'}).first().click();

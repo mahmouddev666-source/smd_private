@@ -24,6 +24,8 @@ import {
   MissionRecord,
   ZKTecoDevice,
   BiometricLogEntry,
+  DeviceConnection,
+  ZktecoSyncLog,
   LicenseConfig,
   UserSession,
   UserRole,
@@ -94,6 +96,7 @@ export default function App() {
   const [missions, setMissions] = useState<MissionRecord[]>([]);
   const [devices, setDevices] = useState<ZKTecoDevice[]>([]);
   const [biometricLogs, setBiometricLogs] = useState<BiometricLogEntry[]>([]);
+  const [syncLogs, setSyncLogs] = useState<ZktecoSyncLog[]>([]);
   const [license, setLicense] = useState<LicenseConfig>(() => StorageService.getLicense());
 
   // Modals & navigation helpers
@@ -118,6 +121,7 @@ export default function App() {
     setMissions(StorageService.getMissions());
     setDevices(StorageService.getDevices());
     setBiometricLogs(StorageService.getBiometricLogs());
+    setSyncLogs([]);
     setLicense(StorageService.getLicense());
   }, []);
 
@@ -130,7 +134,8 @@ export default function App() {
     setPermits(snapshot.permits);
     setMissions(snapshot.missions);
     setDevices(snapshot.devices);
-    setBiometricLogs([]);
+    setBiometricLogs(snapshot.biometricLogs);
+    setSyncLogs(snapshot.syncLogs);
   }, []);
 
   const refreshSnapshot = useCallback(async () => {
@@ -264,6 +269,7 @@ export default function App() {
     setMissions([]);
     setDevices([]);
     setBiometricLogs([]);
+    setSyncLogs([]);
   };
 
   // ---------------------------------------------------------------------------
@@ -411,15 +417,45 @@ export default function App() {
     setDevices(await api.fetchDevices());
   };
 
-  /** DEMO_MODE only: the real connector runs on the server (phase 5). */
-  const handleSyncDeviceLogs = (deviceId: string) => {
-    if (mode !== 'demo') return;
+  const handleTestDeviceConnection = async (device: ZKTecoDevice): Promise<DeviceConnection> => {
+    if (mode === 'demo') {
+      return {
+        status: 'connected',
+        serialNumber: device.serialNumber || 'DEMO-SN-0001',
+        firmwareVersion: device.firmwareVersion || 'DEMO-6.60',
+        deviceName: device.deviceModel || 'ZKTeco (محاكاة)',
+        userCount: employees.length,
+        logCount: biometricLogs.filter((log) => log.deviceId === device.id).length,
+        message: 'تم الاتصال بالجهاز في وضع العرض التجريبي فقط — لا يوجد اتصال فعلي بالشبكة.',
+        isDemo: true,
+      };
+    }
+    const info = await api.testDeviceConnection(device.id);
+    setDevices(await api.fetchDevices());
+    return info;
+  };
+
+  const handleSyncDeviceLogs = async (deviceId: string): Promise<ZktecoSyncLog> => {
+    if (mode !== 'demo') {
+      const log = await api.syncDevice(deviceId);
+      const [refreshedDevices, refreshedLogs, refreshedPunches] = await Promise.all([
+        api.fetchDevices(),
+        api.fetchSyncLogs(),
+        api.fetchBiometricLogs(),
+      ]);
+      setDevices(refreshedDevices);
+      setSyncLogs(refreshedLogs);
+      setBiometricLogs(refreshedPunches);
+      return log;
+    }
 
     const dateStr = localDateISO();
     const timeStr = localTimeString().slice(0, 5);
 
     const activeEmployees = employees.filter((employee) => employee.isActive);
-    if (activeEmployees.length === 0) return;
+    if (activeEmployees.length === 0) {
+      throw new Error('لا يوجد موظفون نشطون لتوليد حركات تجريبية.');
+    }
 
     const sampleEmp1 = activeEmployees[0];
     const sampleEmp2 = activeEmployees[1] || activeEmployees[0];
@@ -495,9 +531,27 @@ export default function App() {
         ...device,
         lastSync: `${dateStr} ${timeStr}:00`,
         totalLogs: (device.totalLogs || 0) + 4,
+        status: 'connected',
       });
     }
     loadDemoSnapshot();
+
+    const startedAt = new Date();
+    const demoLog: ZktecoSyncLog = {
+      id: newId('SYNC'),
+      deviceId,
+      status: 'success',
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date(startedAt.getTime() + 1200).toISOString(),
+      fetchedCount: newLogs.length,
+      insertedCount: newLogs.length,
+      duplicateCount: 0,
+      unknownCount: 0,
+      errorMessage: '',
+      isDemo: true,
+    };
+    setSyncLogs((current) => [demoLog, ...current].slice(0, 50));
+    return demoLog;
   };
 
   // Open Smart Form helper from Profile Modal
@@ -686,10 +740,12 @@ export default function App() {
           <ZKTecoManagerView
             devices={devices}
             biometricLogs={biometricLogs}
+            syncLogs={syncLogs}
             employees={employees}
             user={user}
-            syncEnabled={mode === 'demo'}
+            syncEnabled
             onUpdateDevice={handleUpdateDevice}
+            onTestConnection={handleTestDeviceConnection}
             onSyncDeviceLogs={handleSyncDeviceLogs}
           />
         )}

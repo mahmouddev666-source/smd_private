@@ -195,7 +195,10 @@ export interface ZKTecoDevice {
   name: string;
   ipAddress: string;
   port: number;
-  commKey: number;
+  /** Write-only on the server: only the demo store keeps the raw value. */
+  commKey?: number;
+  /** True when the server holds a communication key (value is never returned). */
+  hasCommKey?: boolean;
   location: string;
   status: 'connected' | 'disconnected' | 'syncing' | 'error';
   lastSync?: string;
@@ -205,6 +208,31 @@ export interface ZKTecoDevice {
   totalUsers?: number;
   totalLogs?: number;
   totalFingers?: number;
+  isDemo?: boolean;
+}
+
+export interface DeviceConnection {
+  status: string;
+  serialNumber: string;
+  firmwareVersion: string;
+  deviceName: string;
+  userCount: number;
+  logCount: number;
+  message: string;
+  isDemo?: boolean;
+}
+
+export interface ZktecoSyncLog {
+  id: string;
+  deviceId: string;
+  status: 'running' | 'success' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  fetchedCount: number;
+  insertedCount: number;
+  duplicateCount: number;
+  unknownCount: number;
+  errorMessage: string;
   isDemo?: boolean;
 }
 

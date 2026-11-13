@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     libreoffice_bin: str = "soffice"
     libreoffice_timeout_seconds: int = 120
 
+    # ZKTeco connector (server-side only, never from the browser)
+    zkteco_timeout_seconds: float = 8.0
+    zkteco_max_attempts: int = 2
+    zkteco_retry_delay_seconds: float = 1.0
+    zkteco_sync_lookback_days: int = 7
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

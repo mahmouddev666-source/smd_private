@@ -8,6 +8,8 @@
 
 import {
   AttendanceRecord,
+  BiometricLogEntry,
+  DeviceConnection,
   Employee,
   FormFieldPlacement,
   FormFile,
@@ -23,9 +25,11 @@ import {
   UserRole,
   UserSession,
   ZKTecoDevice,
+  ZktecoSyncLog,
 } from '../types';
 import { calculateOvertime } from '../utils/overtimeCalculator';
 import { normalizeTime } from '../utils/dateUtils';
+import { formatSyncTime } from '../utils/zkteco';
 
 const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api').replace(/\/+$/, '');
 
@@ -287,6 +291,45 @@ interface DeviceDto {
   location: string;
   model: string;
   status: string;
+  serial_number: string;
+  firmware_version: string;
+  total_users: number;
+  total_logs: number;
+  last_sync_at: string | null;
+  has_comm_key: boolean;
+  is_demo: boolean;
+}
+
+interface ConnectionDto {
+  status: string;
+  serial_number: string;
+  firmware_version: string;
+  device_name: string;
+  user_count: number;
+  log_count: number;
+  message: string;
+}
+
+interface SyncLogDto {
+  id: string;
+  device_id: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  fetched_count: number;
+  inserted_count: number;
+  duplicate_count: number;
+  unknown_count: number;
+  error_message: string;
+}
+
+interface PunchDto {
+  id: string;
+  device_id: string;
+  enroll_number: string;
+  punch_time: string;
+  punch_type: string;
+  verify_mode: string;
   is_demo: boolean;
 }
 
@@ -495,11 +538,76 @@ export function mapDevice(dto: DeviceDto): ZKTecoDevice {
     ipAddress: dto.ip_address,
     port: dto.port,
     commKey: 0,
+    hasCommKey: dto.has_comm_key,
     location: dto.location,
     status: (['connected', 'disconnected', 'syncing', 'error'].includes(dto.status)
       ? dto.status
       : 'disconnected') as ZKTecoDevice['status'],
+    lastSync: dto.last_sync_at ? formatSyncTime(dto.last_sync_at) : undefined,
     deviceModel: dto.model,
+    serialNumber: dto.serial_number || undefined,
+    firmwareVersion: dto.firmware_version || undefined,
+    totalUsers: dto.total_users,
+    totalLogs: dto.total_logs,
+    isDemo: dto.is_demo,
+  };
+}
+
+export function mapConnection(dto: ConnectionDto): DeviceConnection {
+  return {
+    status: dto.status,
+    serialNumber: dto.serial_number,
+    firmwareVersion: dto.firmware_version,
+    deviceName: dto.device_name,
+    userCount: dto.user_count,
+    logCount: dto.log_count,
+    message: dto.message,
+  };
+}
+
+export function mapSyncLog(dto: SyncLogDto): ZktecoSyncLog {
+  const status = ['running', 'success', 'failed'].includes(dto.status)
+    ? (dto.status as ZktecoSyncLog['status'])
+    : 'failed';
+  return {
+    id: dto.id,
+    deviceId: dto.device_id,
+    status,
+    startedAt: dto.started_at,
+    finishedAt: dto.finished_at ?? undefined,
+    fetchedCount: dto.fetched_count,
+    insertedCount: dto.inserted_count,
+    duplicateCount: dto.duplicate_count,
+    unknownCount: dto.unknown_count,
+    errorMessage: dto.error_message,
+  };
+}
+
+const PUNCH_TYPES: BiometricLogEntry['punchType'][] = [
+  'دخول',
+  'خروج',
+  'خروج مؤقت (إذن)',
+  'عودة من إذن',
+];
+const VERIFY_MODES: BiometricLogEntry['verifyMode'][] = [
+  'بصمة إصبع',
+  'بصمة وجه',
+  'كارت RFID',
+  'كلمة سر',
+];
+
+export function mapPunch(dto: PunchDto): BiometricLogEntry {
+  return {
+    id: dto.id,
+    deviceId: dto.device_id,
+    enrollNumber: dto.enroll_number,
+    timestamp: formatSyncTime(dto.punch_time),
+    verifyMode: (VERIFY_MODES as string[]).includes(dto.verify_mode)
+      ? (dto.verify_mode as BiometricLogEntry['verifyMode'])
+      : 'بصمة إصبع',
+    punchType: (PUNCH_TYPES as string[]).includes(dto.punch_type)
+      ? (dto.punch_type as BiometricLogEntry['punchType'])
+      : 'دخول',
     isDemo: dto.is_demo,
   };
 }
@@ -593,6 +701,18 @@ export async function fetchDevices(): Promise<ZKTecoDevice[]> {
   return rows.map(mapDevice);
 }
 
+export async function fetchBiometricLogs(deviceId?: string): Promise<BiometricLogEntry[]> {
+  const suffix = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+  const rows = await request<PunchDto[]>(`/devices/punches${suffix}`);
+  return rows.map(mapPunch);
+}
+
+export async function fetchSyncLogs(deviceId?: string): Promise<ZktecoSyncLog[]> {
+  const suffix = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+  const rows = await request<SyncLogDto[]>(`/devices/sync-logs${suffix}`);
+  return rows.map(mapSyncLog);
+}
+
 export interface HrSnapshot {
   employees: Employee[];
   attendance: AttendanceRecord[];
@@ -601,20 +721,35 @@ export interface HrSnapshot {
   permits: PermitRecord[];
   missions: MissionRecord[];
   devices: ZKTecoDevice[];
+  biometricLogs: BiometricLogEntry[];
+  syncLogs: ZktecoSyncLog[];
 }
 
 /** One round of parallel reads. Attendance needs employees for hourly rates. */
 export async function fetchAll(): Promise<HrSnapshot> {
-  const [employees, leaves, leaveBalances, permits, missions, devices] = await Promise.all([
-    fetchEmployees(),
-    fetchLeaves(),
-    fetchLeaveBalances(),
-    fetchPermits(),
-    fetchMissions(),
-    fetchDevices(),
-  ]);
+  const [employees, leaves, leaveBalances, permits, missions, devices, biometricLogs, syncLogs] =
+    await Promise.all([
+      fetchEmployees(),
+      fetchLeaves(),
+      fetchLeaveBalances(),
+      fetchPermits(),
+      fetchMissions(),
+      fetchDevices(),
+      fetchBiometricLogs(),
+      fetchSyncLogs(),
+    ]);
   const attendance = await fetchAttendance(employees);
-  return { employees, attendance, leaveBalances, leaves, permits, missions, devices };
+  return {
+    employees,
+    attendance,
+    leaveBalances,
+    leaves,
+    permits,
+    missions,
+    devices,
+    biometricLogs,
+    syncLogs,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -706,6 +841,7 @@ export async function createDevice(device: ZKTecoDevice): Promise<ZKTecoDevice> 
       name: device.name,
       ip_address: device.ipAddress,
       port: device.port,
+      comm_key: device.commKey ? String(device.commKey) : '',
       location: device.location,
       model: device.deviceModel || '',
     },
@@ -720,6 +856,8 @@ export async function updateDevice(device: ZKTecoDevice): Promise<ZKTecoDevice> 
       name: device.name,
       ip_address: device.ipAddress,
       port: device.port,
+      // Empty keeps the stored key on the server.
+      comm_key: device.commKey ? String(device.commKey) : '',
       location: device.location,
       model: device.deviceModel || '',
     },
@@ -729,6 +867,24 @@ export async function updateDevice(device: ZKTecoDevice): Promise<ZKTecoDevice> 
 
 export async function deleteDevice(deviceId: string): Promise<void> {
   await request(`/devices/${deviceId}`, { method: 'DELETE' });
+}
+
+/** Opens the TCP session from the API host (never from the browser). */
+export async function testDeviceConnection(deviceId: string): Promise<DeviceConnection> {
+  const dto = await request<ConnectionDto>(
+    `/devices/${encodeURIComponent(deviceId)}/test-connection`,
+    { method: 'POST', timeoutMs: 30000 },
+  );
+  return mapConnection(dto);
+}
+
+/** Pulls punches once, de-duplicates them and records a sync log. */
+export async function syncDevice(deviceId: string): Promise<ZktecoSyncLog> {
+  const dto = await request<SyncLogDto>(`/devices/${encodeURIComponent(deviceId)}/sync`, {
+    method: 'POST',
+    timeoutMs: 120000,
+  });
+  return mapSyncLog(dto);
 }
 
 // ---------------------------------------------------------------------------

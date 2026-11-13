@@ -9,6 +9,8 @@ pyjwt==2.10.1
 pwdlib[argon2]==0.2.1
 python-multipart==0.0.20
 email-validator==2.2.0
+# ZKTeco LAN connector (imported lazily; demo mode works without it)
+pyzk==0.9
 
 # dev / test
 pytest==8.3.4
