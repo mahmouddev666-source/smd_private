@@ -268,6 +268,8 @@ docker compose exec api python -m app.seed --profile demo
 
 > **التجربة بدون خادم:** عند عدم تشغيل API يمكن تجربة الرفع/التصميم/التعبئة/الطباعة عبر مخزن IndexedDB مؤقت (`services/formStore.ts`) ببانر دائم، في بناءات التطوير فقط. الخطوات الكاملة لتشغيل الـ API محليًا بـ Python + SQLite (بدون Docker) في `docs/RUN-WITHOUT-DOCKER.md`.
 
+> **تحديث التنقل (UI فقط):** تحوّل الشريط العلوي إلى Sidebar يمينية ثابتة بعرض 260px تحترم RTL (`components/Navbar.tsx` → `Sidebar`)، وفي الموبايل تتحول إلى Drawer عبر زر Hamburger. بيانات المستخدم ودور الخروج وأزرار النسخ الاحتياطي/الترخيص أصبحت أسفل الشريط. لا تغيير في الباك إند أو نماذج البيانات. أُضيف اختبارا E2E: ظهور الشريط على Desktop، وفتح/إغلاق Drawer على Mobile.
+
 ---
 
 ### المرحلة 5 — تكامل ZKTeco

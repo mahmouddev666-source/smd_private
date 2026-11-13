@@ -36,6 +36,31 @@ test.describe('SMD-HR baseline', () => {
     await expect(page.getByRole('navigation').first()).toBeVisible();
     await expect(page.getByText('لوحة التحكم').first()).toBeVisible();
     await expect(page.getByText('حضور اليوم (البصمة)')).toBeVisible();
+
+    // The navigation now lives in a right-side rail with the session footer.
+    const rail = page.getByRole('complementary', {name: 'القائمة الرئيسية'}).first();
+    await expect(rail).toBeVisible();
+    const box = await rail.boundingBox();
+    expect(box?.x).toBeGreaterThan(900);
+    await expect(page.getByRole('button', {name: 'تسجيل الخروج'})).toBeVisible();
+  });
+
+  test('mobile navigation opens as a drawer from the hamburger', async ({page}) => {
+    await page.setViewportSize({width: 390, height: 844});
+    await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
+    await expect(page.getByText(/مرحباً/)).toBeVisible();
+
+    // Drawer starts closed: the navigation links are not rendered at all.
+    await expect(page.getByRole('button', {name: 'العاملين'})).toHaveCount(0);
+
+    await page.getByRole('button', {name: 'فتح القائمة'}).click();
+    await expect(page.getByRole('button', {name: 'العاملين'})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'إغلاق القائمة'})).toBeVisible();
+
+    await page.getByRole('button', {name: 'العاملين'}).click();
+    // Navigating closes the drawer and shows the chosen screen.
+    await expect(page.getByRole('button', {name: 'إغلاق القائمة'})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'إضافة موظف جديد'})).toBeVisible();
   });
 
   test('navigates to the main HR modules', async ({page}) => {

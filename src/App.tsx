@@ -31,7 +31,7 @@ import {
 import * as api from './services/apiClient';
 import { StorageService } from './services/storage';
 import { DEMO_ACCOUNTS, Login } from './components/Login';
-import { Navbar, ActiveTab } from './components/Navbar';
+import { Sidebar, ActiveTab } from './components/Navbar';
 import { LockScreen } from './components/LockScreen';
 import { Dashboard } from './components/Dashboard';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
@@ -49,7 +49,7 @@ import { BackupAndRestoreModal } from './components/BackupAndRestoreModal';
 import { calculateOvertime } from './utils/overtimeCalculator';
 import { localDateISO, localTimeString } from './utils/dateUtils';
 import { newId } from './utils/id';
-import { AlertCircle, CheckCircle2, Database, Loader2, RefreshCw, WifiOff } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, WifiOff } from 'lucide-react';
 
 type DataMode = 'api' | 'demo';
 
@@ -555,10 +555,10 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white"
+      className="min-h-screen bg-slate-100/70 text-slate-900 flex font-sans selection:bg-blue-600 selection:text-white"
       dir="rtl"
     >
-      <Navbar
+      <Sidebar
         activeTab={activeTab}
         onTabChange={setActiveTab}
         user={user}
@@ -570,7 +570,10 @@ export default function App() {
         showLicensingButton={mode === 'demo'}
       />
 
-      <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4 space-y-3">
+      {/* Main column: offset by the fixed 260px rail on md+, and by the slim
+          mobile header height below md. */}
+      <div className="flex-1 min-w-0 flex flex-col pt-16 md:pt-0 md:mr-[260px]">
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4 space-y-3">
         {mode === 'demo' && (
           <div
             role="status"
@@ -725,49 +728,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Complete Employee Profile Dossier Modal */}
-      {selectedEmployee && (
-        <EmployeeProfileModal
-          employee={selectedEmployee}
-          balance={selectedEmployeeBalance}
-          attendance={attendance}
-          leaves={leaves}
-          permits={permits}
-          missions={missions}
-          onClose={() => setSelectedProfileEmpId(null)}
-          onOpenSmartForm={handleOpenSmartForm}
-        />
-      )}
-
-      {/* Local backup/restore stays available only in demo mode. */}
-      {mode === 'demo' && (
-        <>
-          <BackupAndRestoreModal
-            isOpen={showBackupModal}
-            onClose={() => setShowBackupModal(false)}
-            employees={employees}
-            attendance={attendance}
-            leaveBalances={leaveBalances}
-            leaves={leaves}
-            permits={permits}
-            missions={missions}
-            onDataRestored={handleDataRestored}
-          />
-
-          <div className="fixed bottom-4 left-4 z-40 no-print flex items-center gap-2">
-            <button
-              onClick={() => setShowBackupModal(true)}
-              className="px-3.5 py-2.5 bg-gradient-to-r from-blue-900 to-slate-900 hover:from-blue-800 hover:to-slate-800 text-white rounded-xl text-xs font-bold shadow-xl border border-blue-400/30 flex items-center gap-2 cursor-pointer transition-transform hover:scale-105 active:scale-95"
-              title="استرداد وتصدير ملفات وبيانات المنظومة — وضع العرض المحلي فقط"
-            >
-              <Database className="w-4 h-4 text-cyan-300" />
-              <span className="hidden sm:inline">مركز استرداد وتصدير الملفات</span>
-              <span className="sm:hidden">استرداد وتصدير</span>
-            </button>
-          </div>
-        </>
-      )}
-
       {/* Quiet Corporate Footer */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500 no-print">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
@@ -790,6 +750,38 @@ export default function App() {
           </div>
         </div>
       </footer>
+      </div>
+
+      {/* Complete Employee Profile Dossier Modal */}
+      {selectedEmployee && (
+        <EmployeeProfileModal
+          employee={selectedEmployee}
+          balance={selectedEmployeeBalance}
+          attendance={attendance}
+          leaves={leaves}
+          permits={permits}
+          missions={missions}
+          onClose={() => setSelectedProfileEmpId(null)}
+          onOpenSmartForm={handleOpenSmartForm}
+        />
+      )}
+
+      {/* Local backup/restore stays available only in demo mode; the trigger
+          now lives in the sidebar footer instead of a floating button. */}
+      {mode === 'demo' && (
+        <BackupAndRestoreModal
+          isOpen={showBackupModal}
+          onClose={() => setShowBackupModal(false)}
+          employees={employees}
+          attendance={attendance}
+          leaveBalances={leaveBalances}
+          leaves={leaves}
+          permits={permits}
+          missions={missions}
+          onDataRestored={handleDataRestored}
+        />
+      )}
+
     </div>
   );
 }
