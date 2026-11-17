@@ -71,7 +71,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'leaves', label: 'الإجازات والأرصدة', icon: Calendar },
   { id: 'permits', label: 'الأذونات والمأموريات', icon: Briefcase },
   { id: 'zkteco', label: 'أجهزة ZKTeco', icon: Cpu },
-  { id: 'reports', label: 'التحليل القطاعي', icon: BarChart3 },
+  { id: 'reports', label: 'التقارير والتحليلات', icon: BarChart3 },
   { id: 'forms', label: 'النماذج والمستندات', icon: FileText },
   { id: 'architecture', label: 'المعمارية و SQL', icon: Database },
 ];

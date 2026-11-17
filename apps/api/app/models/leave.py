@@ -43,5 +43,6 @@ class Leave(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="قيد المراجعة")
     approved_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     approval_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    decision_notes: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     notes: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

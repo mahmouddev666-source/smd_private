@@ -26,6 +26,7 @@ class LeaveCreate(BaseModel):
 
 class LeaveDecision(BaseModel):
     status: str = Field(pattern="^(معتمد|مرفوض)$")
+    notes: str = Field(default="", max_length=500)
 
 
 class LeaveOut(ORMModel):
@@ -40,6 +41,7 @@ class LeaveOut(ORMModel):
     status: str
     approved_by: str | None
     approval_date: date | None
+    decision_notes: str
     notes: str
     is_demo: bool
     created_at: datetime

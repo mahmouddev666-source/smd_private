@@ -260,6 +260,25 @@ export const StorageService = {
     }
     return newRecord;
   },
+  decideLeave(leaveId: string, status: 'معتمد' | 'مرفوض', notes: string = ''): LeaveRecord {
+    const list = this.getLeaves();
+    const leave = list.find((item) => item.id === leaveId);
+    if (!leave) {
+      throw new Error('طلب الإجازة غير موجود.');
+    }
+    if (leave.status !== 'قيد المراجعة') {
+      throw new Error('تم البت في هذا الطلب مسبقًا، لا يمكن تغيير قراره.');
+    }
+    leave.status = status;
+    leave.approvedBy = 'الموارد البشرية';
+    leave.approvalDate = localDateISO();
+    leave.decisionNotes = notes;
+    this.saveLeaves(list);
+    if (status === 'معتمد') {
+      this.updateBalanceForLeave(leave);
+    }
+    return leave;
+  },
   updateBalanceForLeave(leave: LeaveRecord): void {
     const balances = this.getLeaveBalances();
     const balance = balances.find((item) => item.employeeId === leave.employeeId);

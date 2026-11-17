@@ -30,6 +30,7 @@ TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commi
 DEMO_ACCOUNTS = {
     "admin": ("Admin@12345", "ADMIN"),
     "hr": ("Hr@12345", "HR"),
+    "supervisor": ("Super@12345", "SUPERVISOR"),
     "viewer": ("Viewer@12345", "VIEWER"),
 }
 

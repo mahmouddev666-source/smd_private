@@ -50,6 +50,8 @@ services:
       SEED_DEMO_ON_START: ${SEED_DEMO_ON_START:-false}
       DEMO_MODE: ${DEMO_MODE:-true}
       LIBREOFFICE_BIN: ${LIBREOFFICE_BIN:-/usr/bin/libreoffice}
+      # The worker owns device polling so a terminal is never polled twice.
+      ZK_SYNC_ENABLED: "false"
     volumes:
       - uploads:/data/uploads
       - backups:/backups
@@ -62,6 +64,44 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    networks:
+      - smd
+
+  worker:
+    build:
+      context: ./apps/api
+    image: smd-hr-worker:latest
+    container_name: smd-hr-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-smd}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-smd_hr}
+      TZ: ${TZ:-Africa/Cairo}
+      STORAGE_DIR: /data/uploads
+      BACKUP_DIR: /backups
+      # Background maintenance: ZKTeco polling + daily pg_dump.
+      ZK_SYNC_ENABLED: ${ZK_SYNC_ENABLED:-true}
+      WORKER_TICK_SECONDS: ${WORKER_TICK_SECONDS:-60}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - uploads:/data/uploads
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import app.worker\""]
+      interval: 60s
+      timeout: 10s
+      retries: 3
       start_period: 30s
     networks:
       - smd

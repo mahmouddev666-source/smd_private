@@ -12,8 +12,15 @@ import { UserRole } from '../types';
 /** Roles allowed to create/update business data (mirrors the API EDITOR_ROLES). */
 export const EDITOR_ROLES: UserRole[] = ['ADMIN', 'HR'];
 
+/** Roles allowed to approve/reject leave requests (mirrors APPROVER_ROLES). */
+export const APPROVER_ROLES: UserRole[] = ['ADMIN', 'HR'];
+
 export function canEdit(role: UserRole): boolean {
   return EDITOR_ROLES.includes(role);
+}
+
+export function canApprove(role: UserRole): boolean {
+  return APPROVER_ROLES.includes(role);
 }
 
 export function isAdmin(role: UserRole): boolean {

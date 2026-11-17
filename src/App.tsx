@@ -44,7 +44,7 @@ import { OvertimeCalculatorWidget } from './components/OvertimeCalculatorWidget'
 import { LeaveAndBalances } from './components/LeaveAndBalances';
 import { PermitsAndMissions } from './components/PermitsAndMissions';
 import { ZKTecoManagerView } from './components/ZKTecoManagerView';
-import { DepartmentReports } from './components/DepartmentReports';
+import { ReportsCenter } from './components/ReportsCenter';
 import { FormsManager } from './components/FormsManager';
 import { ArchitectureAndDbView } from './components/ArchitectureAndDbView';
 import { LicensingManager } from './components/LicensingManager';
@@ -404,14 +404,24 @@ export default function App() {
       loadDemoSnapshot();
       return;
     }
-    // The API creates leaves as "قيد المراجعة"; approve immediately because the
-    // UI form is the HR approval action and the balance must be deducted once.
-    const created = await api.createLeave(leave);
-    try {
-      await api.decideLeave(created.id, 'معتمد');
-    } finally {
-      await refreshLeaves();
+    // Requests are always created in "قيد المراجعة"; HR/ADMIN decides later and
+    // only an approved leave deducts the balance (enforced by the API).
+    await api.createLeave(leave);
+    await refreshLeaves();
+  };
+
+  const handleDecideLeave = async (
+    leaveId: string,
+    status: 'معتمد' | 'مرفوض',
+    notes: string = '',
+  ) => {
+    if (mode === 'demo') {
+      StorageService.decideLeave(leaveId, status, notes);
+      loadDemoSnapshot();
+      return;
     }
+    await api.decideLeave(leaveId, status, notes);
+    await refreshLeaves();
   };
 
   // ---------------------------------------------------------------------------
@@ -836,6 +846,7 @@ export default function App() {
             employees={employees}
             user={user}
             onAddLeave={handleAddLeave}
+            onDecideLeave={handleDecideLeave}
             onSelectEmployee={(empId) => setSelectedProfileEmpId(empId)}
           />
         )}
@@ -870,7 +881,7 @@ export default function App() {
         )}
 
         {activeTab === 'reports' && (
-          <DepartmentReports
+          <ReportsCenter
             employees={employees}
             attendance={attendance}
             leaves={leaves}

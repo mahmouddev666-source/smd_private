@@ -19,6 +19,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 
 VALID_ROLES = ("ADMIN", "HR", "SUPERVISOR", "VIEWER")
 EDITOR_ROLES = ("ADMIN", "HR", "SUPERVISOR")
+# Leave approvals are a sensitive HR action: supervisors can request but not decide.
+APPROVER_ROLES = ("ADMIN", "HR")
 
 
 def hash_password(raw_password: str) -> str:

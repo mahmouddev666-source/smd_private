@@ -125,6 +125,7 @@ export interface LeaveRecord {
   status: 'معتمد' | 'قيد المراجعة' | 'مرفوض';
   approvedBy?: string;
   approvalDate?: string;
+  decisionNotes?: string;
   notes?: string;
   isDemo?: boolean;
 }

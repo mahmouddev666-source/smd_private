@@ -70,7 +70,6 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
   const [pDate, setPDate] = useState(localDateISO());
   const [pStart, setPStart] = useState('11:00');
   const [pEnd, setPEnd] = useState('13:00');
-  const [pDuration, setPDuration] = useState(2);
   const [pReason, setPReason] = useState('');
 
   // Mission Form State
@@ -86,12 +85,50 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
 
   const empMap = new Map(employees.map(e => [e.employeeId, e]));
 
+  const permitStartMinutes = (() => {
+    const [h, m] = pStart.split(':').map(Number);
+    return Number.isFinite(h) ? h * 60 + (m || 0) : 0;
+  })();
+  const permitEndMinutes = (() => {
+    const [h, m] = pEnd.split(':').map(Number);
+    return Number.isFinite(h) ? h * 60 + (m || 0) : 0;
+  })();
+  const permitComputedHours = Math.max(0, (permitEndMinutes - permitStartMinutes) / 60);
+  const permitLimit = pType === 'إذن شخصي' ? 2 : 4;
+  const permitHint = (() => {
+    if (permitEndMinutes <= permitStartMinutes) return 'وقت الانتهاء يجب أن يكون بعد وقت البدء.';
+    if (permitComputedHours > permitLimit) {
+      return pType === 'إذن شخصي'
+        ? 'الإذن الشخصي لا يتجاوز ساعتين طبقًا للائحة.'
+        : 'إذن العمل لا يتجاوز 4 ساعات.';
+    }
+    return null;
+  })();
+
+  const missionSpanDays = (() => {
+    if (!mStart || !mEnd) return 0;
+    const start = new Date(`${mStart}T00:00:00`);
+    const end = new Date(`${mEnd}T00:00:00`);
+    return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  })();
+  const missionHint = (() => {
+    if (missionSpanDays <= 0) return 'تاريخ العودة يجب أن يكون بعد تاريخ البدء.';
+    if (Number(mDays) > missionSpanDays) return `عدد الأيام أكبر من الفترة (${missionSpanDays} يوم).`;
+    if (Number(mDays) > 60) return 'أقصى مدة للمأمورية 60 يومًا.';
+    if (mAllowancePerDay > 2000) return 'البدل اليومي يتجاوز الحد الأقصى (2000 ج.م).';
+    return null;
+  })();
+
   const handlePermitSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPermitError(null);
     if (permitSaving) return;
     if (!pEmpId) {
       setPermitError('يرجى اختيار الموظف.');
+      return;
+    }
+    if (permitHint) {
+      setPermitError(permitHint);
       return;
     }
     setPermitSaving(true);
@@ -102,7 +139,7 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
         date: pDate,
         startTime: pStart,
         endTime: pEnd,
-        durationHours: Number(pDuration),
+        durationHours: Number(permitComputedHours.toFixed(2)),
         reason: pReason,
         status: 'معتمد',
         approvedBy: user.name
@@ -124,7 +161,11 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
       setMissionError('يرجى اختيار الموظف وتحديد الجهة أو الموقع.');
       return;
     }
-    const total = mType === 'مأمورية ببدل' ? mDays * mAllowancePerDay : 0;
+    if (missionHint) {
+      setMissionError(missionHint);
+      return;
+    }
+    const total = mType === 'مأمورية ببدل' ? Number(mDays) * Number(mAllowancePerDay) : 0;
     setMissionSaving(true);
     try {
       await onAddMission({
@@ -638,16 +679,21 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">المدة (ساعات)</label>
                   <input
                     type="number"
-                    step="0.5"
-                    min="0.5"
+                    step="0.25"
+                    min="0.25"
                     max="8"
-                    value={pDuration}
-                    onChange={(e) => setPDuration(Number(e.target.value))}
-                    className="w-full px-2 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono"
-                    required
+                    value={permitComputedHours.toFixed(2)}
+                    readOnly
+                    className="w-full px-2 py-2 bg-slate-100 border border-slate-300 rounded-lg text-xs font-mono text-slate-600"
+                    aria-label="المدة المحسوبة تلقائيًا من وقت البدء والانتهاء"
                   />
                 </div>
               </div>
+              {permitHint && (
+                <p className="text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                  {permitHint}
+                </p>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">السبب أو الجهة المقصودة *</label>
                 <input
@@ -788,6 +834,11 @@ export const PermitsAndMissions: React.FC<PermitsAndMissionsProps> = ({
                   />
                 </div>
               </div>
+              {missionHint && (
+                <p className="text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                  {missionHint}
+                </p>
+              )}
               {mType === 'مأمورية ببدل' && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg grid grid-cols-2 gap-3 text-xs">
                   <div>

@@ -74,7 +74,7 @@ test.describe('SMD-HR baseline', () => {
       'الإجازات والأرصدة',
       'الأذونات والمأموريات',
       'أجهزة ZKTeco',
-      'التحليل القطاعي',
+      'التقارير والتحليلات',
       'النماذج والمستندات',
     ];
 
@@ -221,7 +221,7 @@ test.describe('SMD-HR baseline', () => {
     await expect(row).toContainText('إدخال يدوي');
   });
 
-  test('admin creates a leave request and it appears in the approved log', async ({page}) => {
+  test('admin creates a leave request then approves it', async ({page}) => {
     await page.getByRole('button', {name: 'تسجيل الدخول'}).click();
     await page.getByRole('button', {name: 'الإجازات والأرصدة'}).first().click();
 
@@ -234,11 +234,18 @@ test.describe('SMD-HR baseline', () => {
     const dateInputs = dialog.locator('input[type="date"]');
     await dateInputs.nth(0).fill('2030-06-01');
     await dateInputs.nth(1).fill('2030-06-01');
-    await page.getByRole('button', {name: 'اعتماد وخصم من الرصيد'}).click();
+    await dialog.getByRole('button', {name: 'تقديم الطلب للمراجعة'}).click();
 
     await expect(dialog).toHaveCount(0);
-    await page.getByRole('button', {name: /سجل الإجازات المسجلة والمعتمدة/}).click();
-    await expect(page.getByText('2030-06-01 إلى 2030-06-01').first()).toBeVisible();
+    await page.getByRole('button', {name: /سجل الطلبات والاعتمادات/}).click();
+    const row = page.getByRole('row', {name: /2030-06-01/});
+    await expect(row).toBeVisible();
+    await expect(row.getByText('قيد المراجعة')).toBeVisible();
+
+    // HR/ADMIN decides from the pending state.
+    await row.getByRole('button', {name: 'اعتماد'}).click();
+    await page.getByRole('dialog').getByRole('button', {name: 'تأكيد الاعتماد'}).click();
+    await expect(row.getByText('معتمد')).toBeVisible();
   });
 
   test('viewer role cannot record attendance or leaves', async ({page}) => {

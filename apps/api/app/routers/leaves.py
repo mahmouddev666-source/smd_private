@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.security import EDITOR_ROLES, get_current_user, require_role
+from app.core.security import APPROVER_ROLES, EDITOR_ROLES, get_current_user, require_role
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.common import Page
@@ -42,6 +42,8 @@ def decide_leave(
     leave_id: str,
     payload: LeaveDecision,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*APPROVER_ROLES)),
 ) -> LeaveOut:
-    return LeaveOut.model_validate(service.decide_leave(db, leave_id, payload.status, actor))
+    return LeaveOut.model_validate(
+        service.decide_leave(db, leave_id, payload.status, actor, payload.notes)
+    )

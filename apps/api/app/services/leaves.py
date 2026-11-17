@@ -20,6 +20,11 @@ BALANCE_FIELDS = {
     "مرضي": ("sick_used", "sick_total"),
 }
 
+PENDING_STATUS = "قيد المراجعة"
+APPROVED_STATUS = "معتمد"
+REJECTED_STATUS = "مرفوض"
+VALID_DECISIONS = (APPROVED_STATUS, REJECTED_STATUS)
+
 DEFAULT_BALANCE = {
     "annual_total": Decimal("21"),
     "casual_total": Decimal("7"),
@@ -82,6 +87,13 @@ def list_balances(
 def create_leave(db: Session, payload: LeaveCreate, actor: User) -> Leave:
     _ensure_employee(db, payload.employee_id)
 
+    calendar_days = (payload.end_date - payload.start_date).days + 1
+    if Decimal(str(payload.days_count)) > Decimal(calendar_days):
+        raise ValidationError(
+            "عدد الأيام المطلوبة أكبر من الفترة المحددة (من تاريخ البدء إلى الانتهاء).",
+            code="LEAVE_DAYS_EXCEEDED",
+        )
+
     overlap = db.scalar(
         select(Leave).where(
             Leave.employee_id == payload.employee_id,
@@ -98,7 +110,7 @@ def create_leave(db: Session, payload: LeaveCreate, actor: User) -> Leave:
     leave = Leave(
         id=new_id(),
         is_demo=False,
-        status="قيد المراجعة",
+        status=PENDING_STATUS,
         **payload.model_dump(),
     )
     if leave.leave_type in BALANCE_FIELDS:
@@ -124,17 +136,29 @@ def create_leave(db: Session, payload: LeaveCreate, actor: User) -> Leave:
     return leave
 
 
-def decide_leave(db: Session, leave_id: str, status: str, actor: User) -> Leave:
+def decide_leave(
+    db: Session,
+    leave_id: str,
+    status: str,
+    actor: User,
+    notes: str = "",
+) -> Leave:
     leave = db.get(Leave, leave_id)
     if leave is None:
         raise NotFoundError("طلب الإجازة غير موجود.", code="LEAVE_NOT_FOUND")
-    if leave.status == status:
-        raise ConflictError("تم اعتماد هذا الطلب بالفعل بنفس الحالة.", code="LEAVE_ALREADY_DECIDED")
+    if status not in VALID_DECISIONS:
+        raise ValidationError("قرار غير صالح على طلب الإجازة.", code="LEAVE_INVALID_DECISION")
+    if leave.status != PENDING_STATUS:
+        raise ConflictError(
+            "تم البت في هذا الطلب مسبقًا، لا يمكن تغيير قراره.",
+            code="LEAVE_ALREADY_DECIDED",
+        )
 
     days = Decimal(str(leave.days_count))
     balance_snapshot = None
+    previous_status = leave.status
 
-    if status == "معتمد" and leave.leave_type in BALANCE_FIELDS:
+    if status == APPROVED_STATUS and leave.leave_type in BALANCE_FIELDS:
         balance = _get_or_create_balance(db, leave.employee_id, leave.start_date.year)
         used_field, total_field = BALANCE_FIELDS[leave.leave_type]
         remaining = getattr(balance, total_field) - getattr(balance, used_field)
@@ -142,22 +166,28 @@ def decide_leave(db: Session, leave_id: str, status: str, actor: User) -> Leave:
             raise ValidationError(
                 f"الرصيد المتاح {remaining} يوم فقط، لا يمكن الاعتماد.", code="LEAVE_BALANCE_EXCEEDED"
             )
+        # Deduct exactly once: a decision is only allowed from the pending state.
         setattr(balance, used_field, getattr(balance, used_field) + days)
         balance_snapshot = {used_field: float(getattr(balance, used_field))}
 
-    previous_status = leave.status
     leave.status = status
     leave.approved_by = actor.full_name
     leave.approval_date = date.today()
+    leave.decision_notes = notes
 
     record_audit(
         db,
         actor=actor,
-        action="approve" if status == "معتمد" else "reject",
+        action="approve" if status == APPROVED_STATUS else "reject",
         entity="leave",
         entity_id=leave.id,
         before={"status": previous_status},
-        after={"status": status, "balance": balance_snapshot},
+        after={
+            "status": status,
+            "balance": balance_snapshot,
+            "notes": notes,
+            "approver_role": actor.role,
+        },
     )
     db.commit()
     db.refresh(leave)

@@ -11,6 +11,7 @@ from app.routers import (
     health,
     leave_balances,
     leaves,
+    license,
     permits,
 )
 
@@ -24,3 +25,4 @@ api_router.include_router(leave_balances.router)
 api_router.include_router(permits.router)
 api_router.include_router(devices.router)
 api_router.include_router(forms.router)
+api_router.include_router(license.router)

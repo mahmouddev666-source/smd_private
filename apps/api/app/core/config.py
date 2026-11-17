@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+pysqlite:///./smd_hr_dev.db"
 
-    # CORS
-    cors_origins: str = "http://localhost:3000,http://localhost"
+    # CORS (same-origin in production via nginx; set explicit origins only for
+    # a separate development front-end).
+    cors_origins: str = ""
 
     # Demo data
     demo_mode: bool = True
@@ -40,6 +41,16 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20
     libreoffice_bin: str = "soffice"
     libreoffice_timeout_seconds: int = 120
+
+    # Business rules: permits (approved values, change only with HR sign-off)
+    permit_personal_max_hours: float = Field(default=2.0, gt=0, le=24)
+    permit_work_max_hours: float = Field(default=4.0, gt=0, le=24)
+    permit_daily_max_hours: float = Field(default=4.0, gt=0, le=24)
+
+    # Business rules: missions and daily allowances
+    mission_max_days: int = Field(default=60, ge=1, le=366)
+    mission_default_allowance_per_day: float = Field(default=450.0, ge=0)
+    mission_max_allowance_per_day: float = Field(default=2000.0, ge=0)
 
     # ZKTeco connector (server-side only, never from the browser)
     # Names match `.env.example` (ZK_*); the older ZKTECO_* names still work.
@@ -61,6 +72,23 @@ class Settings(BaseSettings):
     zkteco_max_attempts: int = 2
     zkteco_retry_delay_seconds: float = 1.0
     zkteco_sync_lookback_days: int = 7
+
+    # Background worker (ZKTeco polling + scheduled database backups)
+    worker_tick_seconds: int = Field(default=60, ge=10, le=3600)
+
+    # Backups (logical PostgreSQL dumps via pg_dump)
+    backup_enabled: bool = True
+    backup_interval_hours: int = Field(default=24, ge=1, le=720)
+    backup_retention_days: int = Field(default=30, ge=1, le=3650)
+    backup_dir: str = "./backups"
+    pg_dump_bin: str = "pg_dump"
+    backup_timeout_seconds: int = Field(default=600, ge=30, le=7200)
+
+    # Licence: status-only placeholder. It never blocks the application; a
+    # signed server-side licence can replace this in a later phase.
+    license_key: str = ""
+    license_expires_on: str = ""
+    license_enforce: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

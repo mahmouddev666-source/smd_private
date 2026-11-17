@@ -237,6 +237,7 @@ interface LeaveDto {
   status: string;
   approved_by: string | null;
   approval_date: string | null;
+  decision_notes: string;
   notes: string;
   is_demo: boolean;
 }
@@ -492,6 +493,7 @@ export function mapLeave(dto: LeaveDto): LeaveRecord {
     status: dto.status as LeaveRecord['status'],
     approvedBy: dto.approved_by || undefined,
     approvalDate: dto.approval_date || undefined,
+    decisionNotes: dto.decision_notes || undefined,
     notes: dto.notes || '',
     isDemo: dto.is_demo,
   };
@@ -887,8 +889,15 @@ export async function createLeave(payload: Omit<LeaveRecord, 'id'>): Promise<Lea
   return mapLeave(dto);
 }
 
-export async function decideLeave(leaveId: string, status: 'معتمد' | 'مرفوض'): Promise<LeaveRecord> {
-  const dto = await request<LeaveDto>(`/leaves/${leaveId}/decision`, { method: 'POST', body: { status } });
+export async function decideLeave(
+  leaveId: string,
+  status: 'معتمد' | 'مرفوض',
+  notes: string = '',
+): Promise<LeaveRecord> {
+  const dto = await request<LeaveDto>(`/leaves/${leaveId}/decision`, {
+    method: 'POST',
+    body: { status, notes },
+  });
   return mapLeave(dto);
 }
 

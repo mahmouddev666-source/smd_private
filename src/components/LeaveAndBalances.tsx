@@ -4,7 +4,7 @@
  * (Annual, Casual, Sick 3-Year Cycle, Maternity, Hajj, Social, Unpaid)
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   LeaveRecord, 
   LeaveBalance, 
@@ -22,12 +22,14 @@ import {
   AlertTriangle,
   UserCheck,
   Camera,
-  Upload
+  Upload,
+  XCircle,
+  ShieldCheck
 } from 'lucide-react';
 import { exportLeaveBalancesToExcel, parseExcelFile } from '../utils/fileExport';
 import { localDateISO } from '../utils/dateUtils';
 import { PhotoImportModal } from './PhotoImportModal';
-import { canEdit } from '../utils/roles';
+import { canApprove, canEdit } from '../utils/roles';
 
 interface LeaveAndBalancesProps {
   leaves: LeaveRecord[];
@@ -35,6 +37,7 @@ interface LeaveAndBalancesProps {
   employees: Employee[];
   user: UserSession;
   onAddLeave: (leave: Omit<LeaveRecord, 'id'>) => Promise<void>;
+  onDecideLeave: (leaveId: string, status: 'معتمد' | 'مرفوض', notes?: string) => Promise<void>;
   onSelectEmployee: (employeeId: string) => void;
 }
 
@@ -59,6 +62,7 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
   employees,
   user,
   onAddLeave,
+  onDecideLeave,
   onSelectEmployee
 }) => {
   const [activeTab, setActiveTab] = useState<'balances' | 'requests'>('balances');
@@ -67,6 +71,27 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const userCanEdit = canEdit(user.role);
+  const userCanApprove = canApprove(user.role);
+
+  // Decision modal (approve with optional note / reject with a required reason).
+  const [decision, setDecision] = useState<{ leave: LeaveRecord; status: 'معتمد' | 'مرفوض' } | null>(null);
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState(false);
+
+  const pendingCount = leaves.filter((leave) => leave.status === 'قيد المراجعة').length;
+
+  useEffect(() => {
+    if (!decision) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !deciding) {
+        setDecision(null);
+        setDecisionError(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [decision, deciding]);
 
   // New Leave Form State
   const [empId, setEmpId] = useState(employees[0]?.employeeId || '');
@@ -101,6 +126,13 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
       setFormError('تاريخ الانتهاء يجب أن يكون بعد تاريخ البدء.');
       return;
     }
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${endDate}T00:00:00`);
+    const calendarDays = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (daysCount > calendarDays) {
+      setFormError('عدد الأيام المطلوبة أكبر من الفترة المحددة.');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -112,9 +144,7 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
         daysCount: Number(daysCount),
         reason,
         replacementEmployeeId: replacementEmpId,
-        status: 'معتمد',
-        approvedBy: user.name,
-        approvalDate: localDateISO()
+        status: 'قيد المراجعة',
       });
       setShowAddModal(false);
       setFormError(null);
@@ -122,6 +152,32 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
       setFormError(error instanceof Error ? error.message : 'تعذر حفظ طلب الإجازة.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openDecision = (leave: LeaveRecord, status: 'معتمد' | 'مرفوض') => {
+    setDecision({ leave, status });
+    setDecisionNotes('');
+    setDecisionError(null);
+  };
+
+  const submitDecision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!decision || deciding) return;
+    if (decision.status === 'مرفوض' && !decisionNotes.trim()) {
+      setDecisionError('يرجى إدخال سبب الرفض ليظهر للموظف في سجل الطلبات.');
+      return;
+    }
+    setDeciding(true);
+    setDecisionError(null);
+    try {
+      await onDecideLeave(decision.leave.id, decision.status, decisionNotes.trim());
+      setDecision(null);
+      setDecisionNotes('');
+    } catch (error) {
+      setDecisionError(error instanceof Error ? error.message : 'تعذر حفظ القرار.');
+    } finally {
+      setDeciding(false);
     }
   };
 
@@ -147,10 +203,8 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
           daysCount: Number(r.daysCount) || 1,
           reason: r.reason || 'مستورد ضوئياً من صورة نموذج طلب الإجازة',
           replacementEmployeeId: r.replacementEmployeeId || '',
-          status: 'معتمد',
-          approvedBy: user.name,
-          approvalDate: localDateISO(),
-          notes: 'تم المسح الضوئي والاعتماد آلياً'
+          status: 'قيد المراجعة',
+          notes: 'تم المسح الضوئي — بانتظار اعتماد الموارد البشرية'
         });
         addedCount += 1;
       } catch {
@@ -158,7 +212,7 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
       }
     }
     setImportSuccessMsg(
-      `تم استيراد ${addedCount} طلب إجازة بنجاح وخصمها من الأرصدة` +
+      `تم استيراد ${addedCount} طلب إجازة بنجاح كطلبات قيد المراجعة` +
       (addedCount < rows.length ? ` — تم تجاهل ${rows.length - addedCount} صف لموظف غير مسجل أو غير صالح.` : '!'),
     );
     setTimeout(() => setImportSuccessMsg(null), 4500);
@@ -192,9 +246,8 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
             endDate: eDate,
             daysCount: days,
             reason: reasonText,
-            status: 'معتمد',
-            approvedBy: user.name,
-            approvalDate: localDateISO()
+            status: 'قيد المراجعة',
+            notes: 'مستورد من ملف Excel — بانتظار اعتماد الموارد البشرية'
           });
           addedCount++;
         } catch {
@@ -329,7 +382,12 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
               : 'text-slate-600 hover:text-slate-900 bg-white border border-slate-200'
           }`}
         >
-          سجل الإجازات المسجلة والمعتمدة ({leaves.length})
+          سجل الطلبات والاعتمادات ({leaves.length})
+          {pendingCount > 0 && (
+            <span className="mr-1.5 px-1.5 py-0.5 bg-amber-400 text-amber-950 rounded-full text-[10px] font-bold">
+              {pendingCount} قيد المراجعة
+            </span>
+          )}
         </button>
       </div>
 
@@ -451,12 +509,20 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
                   <th className="py-3 px-4">السبب / الملاحظات</th>
                   <th className="py-3 px-3">الاعتماد</th>
                   <th className="py-3 px-3">الحالة</th>
+                  <th className="py-3 px-3 text-center">الإجراء</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {filteredLeaves.map(l => {
                   const emp = empMap.get(l.employeeId);
                   const rep = l.replacementEmployeeId ? empMap.get(l.replacementEmployeeId) : null;
+                  const isPending = l.status === 'قيد المراجعة';
+                  const statusClass =
+                    l.status === 'معتمد'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : l.status === 'مرفوض'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-amber-100 text-amber-800';
                   return (
                     <tr key={l.id} className="hover:bg-slate-50 transition-colors">
                       <td className="py-3 px-3 font-mono font-bold text-slate-700">{l.id}</td>
@@ -466,12 +532,43 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
                       <td className="py-3 px-3 font-mono text-slate-600">{l.startDate} إلى {l.endDate}</td>
                       <td className="py-3 px-3 font-mono font-bold text-slate-900">{l.daysCount} يوم</td>
                       <td className="py-3 px-4 text-slate-600">{rep ? rep.name : '—'}</td>
-                      <td className="py-3 px-4 text-slate-500 max-w-xs truncate">{l.reason || l.notes || '—'}</td>
+                      <td className="py-3 px-4 text-slate-500 max-w-xs">
+                        <span className="block truncate">{l.reason || l.notes || '—'}</span>
+                        {l.decisionNotes && (
+                          <span className="mt-1 block text-[10px] font-semibold text-slate-500">
+                            قرار الإدارة: {l.decisionNotes}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3 px-3 text-slate-700">{l.approvedBy || '—'}</td>
                       <td className="py-3 px-3">
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[11px]">
+                        <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${statusClass}`}>
                           {l.status}
                         </span>
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {userCanApprove && isPending ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => openDecision(l, 'معتمد')}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-bold transition-colors cursor-pointer"
+                              title="اعتماد الطلب وخصم الرصيد مرة واحدة"
+                            >
+                              اعتماد
+                            </button>
+                            <button
+                              onClick={() => openDecision(l, 'مرفوض')}
+                              className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-bold transition-colors cursor-pointer"
+                              title="رفض الطلب دون خصم الرصيد"
+                            >
+                              رفض
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">
+                            {isPending ? 'بانتظار HR' : 'مكتمل'}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -626,7 +723,113 @@ export const LeaveAndBalances: React.FC<LeaveAndBalancesProps> = ({
                   disabled={saving}
                   className="px-5 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer disabled:cursor-wait"
                 >
-                  {saving ? 'جارٍ الاعتماد...' : 'اعتماد وخصم من الرصيد'}
+                  {saving ? 'جارٍ تقديم الطلب...' : 'تقديم الطلب للمراجعة'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Approve / reject decision modal */}
+      {decision && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-decision-title"
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl"
+          >
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
+              <h3 id="leave-decision-title" className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                {decision.status === 'معتمد' ? (
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-rose-600" />
+                )}
+                {decision.status === 'معتمد' ? 'اعتماد طلب الإجازة' : 'رفض طلب الإجازة'}
+              </h3>
+              <button
+                onClick={() => { setDecision(null); setDecisionError(null); }}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+                aria-label="إغلاق"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 space-y-1">
+              <p>
+                <span className="font-bold">الموظف:</span>{' '}
+                {empMap.get(decision.leave.employeeId)?.name || decision.leave.employeeId}
+              </p>
+              <p>
+                <span className="font-bold">النوع:</span> {decision.leave.leaveType} —{' '}
+                {decision.leave.daysCount} يوم
+              </p>
+              <p className="font-mono">
+                {decision.leave.startDate} إلى {decision.leave.endDate}
+              </p>
+              {decision.status === 'معتمد' ? (
+                <p className="text-emerald-700 font-semibold">
+                  سيتم خصم الرصيد مرة واحدة فقط عند تأكيد الاعتماد.
+                </p>
+              ) : (
+                <p className="text-rose-700 font-semibold">
+                  لن يُخصم أي رصيد عند الرفض، وسيظهر سبب الرفض في السجل.
+                </p>
+              )}
+            </div>
+
+            <form onSubmit={submitDecision} className="space-y-4">
+              <div>
+                <label htmlFor="leave-decision-notes" className="block text-xs font-semibold text-slate-700 mb-1">
+                  {decision.status === 'مرفوض' ? 'سبب الرفض *' : 'ملاحظات القرار (اختياري)'}
+                </label>
+                <textarea
+                  id="leave-decision-notes"
+                  value={decisionNotes}
+                  onChange={(e) => setDecisionNotes(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs resize-none"
+                  placeholder={
+                    decision.status === 'مرفوض'
+                      ? 'مثال: تعارض مع احتياجات العمل أو عدم اكتمال المستندات...'
+                      : 'أي ملاحظات تظهر مع القرار في سجل الطلبات.'
+                  }
+                />
+              </div>
+
+              {decisionError && (
+                <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-[11px] text-rose-800 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{decisionError}</span>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setDecision(null); setDecisionError(null); }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={deciding}
+                  className={`px-5 py-2 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-wait ${
+                    decision.status === 'معتمد'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  {deciding
+                    ? 'جارٍ الحفظ...'
+                    : decision.status === 'معتمد'
+                      ? 'تأكيد الاعتماد'
+                      : 'تأكيد الرفض'}
                 </button>
               </div>
             </form>
