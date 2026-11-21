@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.errors import AppError
 from app.routers import api_router
+from app.services import license as license_service
 from app.services import scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -32,6 +33,20 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def office_no_store(request: Request, call_next):
+        """Wave B: short-lived Office URLs must never be cached.
+
+        Exception handlers run inside this middleware, so rejected callbacks,
+        bad T2 tokens and 404s also receive the header (a route-level wrapper
+        only sees successful handler responses).
+        """
+        response = await call_next(request)
+        if request.url.path.startswith("/api/office/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
@@ -57,6 +72,8 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def on_startup() -> None:
         logger.info("SMD-HR API started (env=%s, tz=%s)", settings.app_env, settings.tz)
+        # T3-18: logs one safe line; only blocks when LICENSE_ENFORCE=true.
+        license_service.enforce_startup()
         # Non-blocking background loop: every terminal is polled in a worker
         # thread. Disabled automatically under APP_ENV=test.
         scheduler.start_scheduler()

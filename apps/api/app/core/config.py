@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -84,11 +84,48 @@ class Settings(BaseSettings):
     pg_dump_bin: str = "pg_dump"
     backup_timeout_seconds: int = Field(default=600, ge=30, le=7200)
 
-    # Licence: status-only placeholder. It never blocks the application; a
-    # signed server-side licence can replace this in a later phase.
+    # Licence: a signed JSON file is the source of truth (T3-18). The legacy
+    # LICENSE_KEY / LICENSE_EXPIRES_ON pair is still accepted as a fallback.
+    license_file: str = "./license.json"
+    license_signing_key: str = ""
+    license_hardware_id: str = ""  # test/container override only
     license_key: str = ""
     license_expires_on: str = ""
     license_enforce: bool = False
+
+    # ONLYOFFICE Document Server (Phase 3 backend). Every field mirrors the
+    # matching `.env.example` name; keep the two files in sync.
+    onlyoffice_enabled: bool = False
+    onlyoffice_internal_url: str = "http://onlyoffice"
+    onlyoffice_internal_host: str = "onlyoffice"
+    onlyoffice_jwt_secret: str = ""
+    onlyoffice_callback_base: str = "http://api:8000"
+    office_token_secret: str = ""
+    office_download_token_ttl_seconds: int = Field(default=600, ge=60, le=86400)
+    office_callback_token_ttl_seconds: int = Field(default=43200, ge=300, le=604800)
+    office_session_ttl_minutes: int = Field(default=60, ge=1, le=1440)
+    office_max_file_mb: int = Field(default=20, ge=1, le=200)
+    office_max_callback_mb: int = Field(default=50, ge=1, le=500)
+    office_version_retention: int = Field(default=0, ge=0)
+    office_legacy_convert_on_upload: bool = True
+    office_require_ds_download_token: bool = True
+    office_allow_coediting: bool = False
+    submission_snapshot_enabled: bool = True
+
+    @model_validator(mode="after")
+    def _validate_office_secrets(self) -> "Settings":
+        """Fail fast instead of silently signing office tokens with a weak key."""
+        if self.onlyoffice_enabled and len(self.office_token_key) < 32:
+            raise ValueError(
+                "ONLYOFFICE_ENABLED=true يتطلب مفتاحًا سريًا بطول 32 حرفًا على الأقل "
+                "(OFFICE_TOKEN_SECRET أو SECRET_KEY)."
+            )
+        return self
+
+    @property
+    def office_token_key(self) -> str:
+        """Secret used to sign/verify the short-lived office URL tokens (T2)."""
+        return self.office_token_secret or self.secret_key
 
     @property
     def cors_origin_list(self) -> list[str]:

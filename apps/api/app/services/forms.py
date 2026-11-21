@@ -9,12 +9,13 @@ from fastapi import UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.models.employee import Employee
 from app.models.form import FormFile, FormSubmission, FormTemplate
 from app.models.user import User
 from app.schemas.form import SubmissionCreate, TemplateCreate, TemplateUpdate
-from app.services import documents
+from app.services import documents, versions
 from app.services.audit import record_audit
 from app.utils.ids import new_id
 
@@ -44,6 +45,7 @@ def store_file(db: Session, upload: UploadFile, actor: User) -> FormFile:
         is_demo=False,
     )
     db.add(file)
+    db.flush()
     record_audit(
         db,
         actor=actor,
@@ -52,6 +54,45 @@ def store_file(db: Session, upload: UploadFile, actor: User) -> FormFile:
         entity_id=file.id,
         after={"_snapshot": _file_snapshot(file)},
     )
+
+    # T3-06: every file gets an immutable v1. A legacy .doc/.xls additionally
+    # gets a converted OOXML v2 which becomes the current editable version.
+    extension = Path(stored.storage_path).suffix.lstrip(".").lower()
+    original_pdf = Path(stored.converted_pdf_path) if stored.converted_pdf_path else None
+    v1 = versions.create_version(
+        db,
+        file,
+        data=data,
+        kind=stored.kind,
+        extension=extension,
+        mime=stored.mime,
+        source="upload",
+        actor=actor,
+        is_original=True,
+        pdf_path=stored.converted_pdf_path,
+        pdf_status="ready" if original_pdf and original_pdf.exists() else "none",
+    )
+    if (
+        stored.kind in documents.OFFICE_KINDS
+        and extension in {"doc", "xls"}
+        and settings.office_legacy_convert_on_upload
+    ):
+        converted = documents.convert_legacy(documents.resolve_storage_path(stored.storage_path))
+        converted_extension = "docx" if stored.kind == "word" else "xlsx"
+        converted_mime = documents.DOCX_MIME if stored.kind == "word" else documents.XLSX_MIME
+        v2 = versions.create_version(
+            db,
+            file,
+            data=converted,
+            kind=stored.kind,
+            extension=converted_extension,
+            mime=converted_mime,
+            source="conversion",
+            parent_id=v1.id,
+            actor=actor,
+        )
+        documents.render_pdf_for_version(db, file, v2)
+
     db.commit()
     db.refresh(file)
     return file

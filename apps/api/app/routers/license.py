@@ -1,13 +1,12 @@
-"""Licence status endpoint.
+"""Licence status endpoint (T3-18).
 
-This is a deliberately small, status-only placeholder: it reports whether a
-licence key is configured and when it expires, but it never blocks requests.
-A signed server-side licence (with signature verification and enforcement) is a
-post-delivery item; until then `LICENSE_ENFORCE` stays `false` by default so the
-on-premise demo and UAT environments keep working.
+Reads the signed ``license.json`` through the licence service and exposes an
+additive, backward-compatible response. It never returns the signing key, the
+full hardware fingerprint or any storage path, and it never fails with 500 for
+a malformed licence file.
 """
 
-from datetime import date, datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -15,6 +14,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.models.user import User
+from app.services import license as license_service
 
 router = APIRouter(prefix="/license", tags=["license"])
 
@@ -22,55 +22,33 @@ router = APIRouter(prefix="/license", tags=["license"])
 class LicenseStatus(BaseModel):
     status: str
     mode: str
+    source: str
     license_key_present: bool
+    client_name: str | None
+    issued_on: str | None
     expires_on: str | None
     days_remaining: int | None
+    hardware_matches: bool | None
     enforced: bool
     message: str
     checked_at: datetime
 
 
-def _parse_expiry(raw: str) -> date | None:
-    value = raw.strip()
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        return None
-
-
 def build_status() -> LicenseStatus:
-    key_present = bool(settings.license_key.strip())
-    expires_on = _parse_expiry(settings.license_expires_on)
-    today = date.today()
-    days_remaining = (expires_on - today).days if expires_on else None
-
-    if not key_present:
-        status = "unconfigured"
-        message = "لم يتم إدخال مفتاح ترخيص بعد؛ النظام يعمل في وضع التجربة ولا يوجد أي قفل."
-    elif expires_on is None:
-        status = "active"
-        message = "مفتاح الترخيص مُسجّل بدون تاريخ انتهاء محدّد."
-    elif days_remaining is not None and days_remaining < 0:
-        status = "expired"
-        message = "انتهت صلاحية الترخيص المسجّل. النظام لا يزال يعمل لأن فرض الترخيص معطّل."
-    elif days_remaining is not None and days_remaining <= 30:
-        status = "expiring"
-        message = f"الترخيص ينتهي بعد {days_remaining} يومًا؛ يرجى التجديد."
-    else:
-        status = "active"
-        message = "الترخيص سارٍ ومفعّل."
-
+    state = license_service.get_license_status()
     return LicenseStatus(
-        status=status,
+        status=state.status,
         mode="demo" if settings.demo_mode else "production",
-        license_key_present=key_present,
-        expires_on=expires_on.isoformat() if expires_on else None,
-        days_remaining=days_remaining,
+        source=state.source,
+        license_key_present=state.license_key_present,
+        client_name=state.client_name,
+        issued_on=state.issued_on,
+        expires_on=state.expires_on,
+        days_remaining=state.days_remaining,
+        hardware_matches=state.hardware_matches,
         enforced=bool(settings.license_enforce),
-        message=message,
-        checked_at=datetime.now(timezone.utc),
+        message=state.message,
+        checked_at=state.checked_at or datetime.now(),
     )
 
 

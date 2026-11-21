@@ -19,6 +19,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 
 VALID_ROLES = ("ADMIN", "HR", "SUPERVISOR", "VIEWER")
 EDITOR_ROLES = ("ADMIN", "HR", "SUPERVISOR")
+# Documents and the ONLYOFFICE editor are restricted to HR decision makers:
+# supervisors may read the library but must not upload, edit or delete.
+DOCUMENT_EDITOR_ROLES = ("ADMIN", "HR")
 # Leave approvals are a sensitive HR action: supervisors can request but not decide.
 APPROVER_ROLES = ("ADMIN", "HR")
 

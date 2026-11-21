@@ -71,7 +71,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 cd apps/api
-pytest                 # 35 اختبارًا على SQLite in-memory
+pytest                 # 117 اختبارًا على SQLite in-memory + هجرات Alembic فعلية
 ```
 
 ## محرك المستندات
@@ -82,6 +82,33 @@ pytest                 # 35 اختبارًا على SQLite in-memory
 - حقول القالب تُخزَّن كإحداثيات نسبية `%` + رقم الصفحة + `binding` (مثل `employee.name` أو `leave.startDate`)، ولا يُعاد رسم المستند إطلاقًا.
 - الحذف منطقي (`is_active=false`)، ويُمنع حذف ملف مرتبط بقالب نشط (`FORM_FILE_IN_USE`).
 
+## الترخيص (T3-18)
+
+الترخيص ملف `license.json` موقّع اختياريًا (HMAC-SHA256)؛ لا يوجد جدول له في قاعدة البيانات.
+`LICENSE_ENFORCE=false` افتراضيًا، لذا لا يمنع الملف أي طلب. عند ضبط `LICENSE_SIGNING_KEY`
+يصبح التوقيع إلزاميًا، وعند ضبط `LICENSE_HARDWARE_ID` تُستخدم البصمة المُعطاة (للاختبار/الحاوية فقط).
+
+```bash
+python -m app.cli.license hardware-id                  # بصمة خادم العميل
+python -m app.cli.license generate --client "شركة ..." --hardware-id <64-hex> \
+    --issued 2026-11-21 --expires 2027-11-21 --out license.json
+python -m app.cli.license verify --file license.json
+```
+
+> لا يطبع CLI مفتاح التوقيع أبدًا. استجابة `/api/license/status` لا تُعيد البصمة كاملة
+> ولا التوقيع ولا مسار الملف.
+
+## إعدادات الورديات (T3-19)
+
+القيم المعتمدة الآن مخزَّنة في صف واحد `work_settings` (بذرها `alembic upgrade head`):
+08:00→16:00، 08:00→20:00، 20:00→08:00، فاصل إضافي 18:00، معاملا 1.35/1.70،
+وسماحية تأخير 15 دقيقة. يقرأها `attendance_processor` مرة لكل دفعة مزامنة.
+`PATCH` يقبل `expected_version`؛ اختلافه يُرجع `409 SETTINGS_VERSION_CONFLICT`.
+
+> الواجهة (`src/utils/overtimeCalculator.ts`) ما زالت تستخدم الثوابت القديمة حتى
+> المرحلة 4. لذلك **لا تغيّر القيم في الإنتاج قبل ربط الواجهة**؛ القيم الافتراضية
+> متطابقة حاليًا فلا يوجد فرق في السلوك.
+
 ## الترحيلات
 
 ```bash
@@ -89,6 +116,8 @@ alembic upgrade head                                  # تطبيق الترحي�
 alembic revision --autogenerate -m "change summary"    # ترحيل جديد
 alembic downgrade -1                                  # تراجع خطوة
 ```
+
+الرأس الحالي: `b7e9c2d4f6a8` (`work_settings`) بعد `f3c1a9d2b7e4` (الإصدارات والجلسات).
 
 ## نقاط النهاية (مختصر)
 
@@ -114,6 +143,8 @@ alembic downgrade -1                                  # تراجع خطوة
 | `GET/POST /api/forms/templates` | قوالب النماذج + حقولها (إحداثيات نسبية) |
 | `GET/PATCH/DELETE /api/forms/templates/{id}` | قراءة/تعديل/تعطيل قالب |
 | `GET/POST /api/forms/submissions` | النماذج المعبأة والمحفوظة |
+| `GET /api/license/status` | حالة الترخيص (ملف موقّع، بدون أسرار) |
+| `GET/PATCH /api/settings/work` | قراءة/تعديل ورديات العمل ومعاملات الإضافي (ADMIN/HR فقط) |
 
 توثيق تفاعلي: `http://localhost/api/docs` (عبر nginx) أو `http://localhost:8000/api/docs`.
 
@@ -130,6 +161,8 @@ alembic downgrade -1                                  # تراجع خطوة
 ## الصلاحيات
 
 - `VIEWER`: قراءة فقط.
-- `HR` و`ADMIN` و`SUPERVISOR`: كتابة (`EDITOR_ROLES`).
+- `HR` و`ADMIN` و`SUPERVISOR`: كتابة في وحدات الحضور والأجهزة والموظفين والإجازات (`EDITOR_ROLES`).
+- `HR` و`ADMIN` فقط: كتابة محرك المستندات والقوالب والـ submissions (`DOCUMENT_EDITOR_ROLES`)؛
+  `SUPERVISOR` يقرأ مكتبة المستندات ولا يعدّلها.
 - الصلاحية تُفحص على الخادم دائمًا، ولا يُعتمد على إخفاء الأزرار في الواجهة.
 - كل عملية كتابة تُسجَّل في `audit_logs`.

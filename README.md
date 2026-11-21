@@ -27,7 +27,7 @@
 > ✅ المراحل 0–7 مكتملة. النظام جاهز للتشغيل الإنتاجي عبر Docker؛ يتبقى فقط التحقق التشغيلي على جهاز الشركة (UAT + استعادة نسخة فعلية + بصمة حقيقية) ضمن تسليم المرحلة 8.
 
 - **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (86/86).
-- **Docker جاهز**: `docker-compose.yml` يشغّل `db` + `api` + `web` (nginx) + `worker` (مزامنة ZKTeco + نسخ احتياطي مجدول)، بصورتين متعددتي المراحل وhealthchecks وvolumes دائمة.
+- **Docker جاهز**: `docker-compose.yml` يشغّل `db` + `api` + `web` (nginx) + `worker` (مزامنة ZKTeco + نسخ احتياطي مجدول) + `onlyoffice` (ONLYOFFICE Document Server، داخلي فقط)، بصور متعددتي المراحل وhealthchecks وvolumes دائمة.
 - **الواجهة مربوطة بالـ API** (المرحلة 3): تسجيل الدخول، الموظفون، الحضور، الإجازات والأرصدة، الأذونات والمأموريات — كلها عبر `/api`. اختبارات: 73/73 Vitest + 21/21 Playwright.
 - **قواعد العمل والتقارير** (المرحلة 6): دورة اعتماد الإجازات `قيد المراجعة → معتمد/مرفوض` بصلاحية `ADMIN/HR` فقط، خصم الرصيد مرة واحدة عند الاعتماد، منع التداخل، حدود الأذونات (ساعتان للشخصي + 4 ساعات يوميًا) وبدلات المأموريات، ومركز تقارير (حضور/إجازات/إضافي/قطاعي) بتصدير Excel وطباعة A4 عربية RTL.
 - **محرك المستندات** (المرحلة 4.1 + 4.2): رفع نماذج الشركة الأصلية (PDF/Word/Excel/صور) وتحويلها إلى PDF على الخادم، مع مكتبة وعارض صفحات (`pdf.js`) وقوالب مرتبطة بالمستند، **مصمم حقول مرئي** (سحب/تحجيم + ربط ببيانات الموظف/الإجازة/المأمورية)، و**وضع تعبئة وطباعة A4**.
@@ -100,7 +100,7 @@ npx playwright test  # اختبارات E2E
 ```bash
 cp .env.example .env          # عدّل SECRET_KEY و POSTGRES_PASSWORD على الأقل
 docker compose up -d --build
-docker compose ps             # يجب أن تظهر db/api/web/worker بحالة healthy/up
+docker compose ps             # db/api/web/worker/onlyoffice بحالة healthy/up
 ```
 
 - الواجهة: <http://localhost>
@@ -110,6 +110,29 @@ docker compose ps             # يجب أن تظهر db/api/web/worker بحال�
 > عند كل إقلاع تنتظر حاوية `api` قاعدة البيانات ثم تنفّذ `alembic upgrade head` تلقائيًا، ثم تبدأ الخدمة.
 > خدمة `worker` تبدأ بعد نجاح فحص صحة `api`، وتتولى **مزامنة أجهزة ZKTeco** و**النسخ الاحتياطي اليومي**.
 > حاوية `api` مضبوطة بـ `ZK_SYNC_ENABLED=false` حتى لا يسحب جهاز البصمة عاملان في الوقت نفسه.
+
+### محرّر المستندات — ONLYOFFICE (بنية تحتية جاهزة، الميزة معطّلة)
+
+حاوية `onlyoffice` مبنية على صورة رسمية مثبّتة (`10.0.0.1`) مع خط **Cairo** العربي،
+ولا تنشر أي منفذ على المضيف: الوصول الوحيد عبر `http://<host>/onlyoffice/` (نفس الأصل،
+مع تمرير WebSocket). وجودها الآن لا يغيّر سلوك النظام؛ أزرار التحرير تظهر فقط عند
+تفعيل `ONLYOFFICE_ENABLED=true` + `VITE_ONLYOFFICE_ENABLED=true` بعد اكتمال المرحلة 3.
+
+```bash
+docker compose up -d --build onlyoffice web
+docker compose ps onlyoffice
+docker compose exec onlyoffice curl -fsS http://127.0.0.1/healthcheck     # true
+curl -fsS http://localhost/onlyoffice/healthcheck                         # true عبر nginx
+docker compose exec onlyoffice fc-list | grep -i cairo                    # Cairo Regular/Bold
+```
+
+> `ONLYOFFICE_JWT_SECRET` **إلزامي** في `.env` (32 حرفًا على الأقل)؛ بدونه يرفض
+> Compose الإقلاع. بعد إعادة إنشاء حاوية `onlyoffice` أعد تشغيل `web` (`docker compose
+> restart web`) لأن nginx يحل اسم الخدمة عند الإقلاع فقط.
+> الدليل التفصيلي والتحقق الكامل: [docs/ONLYOFFICE-PHASE2-INFRA.md](docs/ONLYOFFICE-PHASE2-INFRA.md).
+> تحقق آلي سريع (للقراءة فقط): `powershell -ExecutionPolicy Bypass -File infra\scripts\verify-phase2.ps1`.
+> خطة المرحلة 3: [docs/ONLYOFFICE-PHASE3-TASKS.md](docs/ONLYOFFICE-PHASE3-TASKS.md) ·
+> نموذج البيانات للمراجعة: [docs/ONLYOFFICE-PHASE3-DATA-MODEL.md](docs/ONLYOFFICE-PHASE3-DATA-MODEL.md).
 
 ### أوامر التشغيل اليومية
 
@@ -167,9 +190,10 @@ docker compose exec api python -m app.seed --reset-demo
 │           ├── services/backup.py
 │           └── routers/license.py
 ├── infra/
-│   ├── nginx/default.conf    # SPA + proxy /api
+│   ├── nginx/default.conf    # SPA + proxy /api + virtual path /onlyoffice
+│   ├── onlyoffice/           # صورة DS مخصّصة + خطوط Cairo (Regular/Bold)
 │   └── web/Dockerfile        # بناء الواجهة + nginx (multi-stage)
-├── docker-compose.yml        # db + api + web + worker
+├── docker-compose.yml        # db + api + web + worker + onlyoffice
 ├── docs/                     # الخطة وأدلة النشر
 ├── public/                   # الأصول العامة (الشعار)
 ├── src/                      # الواجهة الحالية (سيتم نقلها إلى apps/web)

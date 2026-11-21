@@ -12,7 +12,9 @@ from app.routers import (
     leave_balances,
     leaves,
     license,
+    office,
     permits,
+    settings,
 )
 
 api_router = APIRouter()
@@ -26,3 +28,5 @@ api_router.include_router(permits.router)
 api_router.include_router(devices.router)
 api_router.include_router(forms.router)
 api_router.include_router(license.router)
+api_router.include_router(settings.router)
+api_router.include_router(office.router)

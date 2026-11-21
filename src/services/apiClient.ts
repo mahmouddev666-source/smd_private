@@ -708,8 +708,12 @@ export async function checkHealth(): Promise<boolean> {
 // Reads
 // ---------------------------------------------------------------------------
 
-async function fetchAllPages<T>(path: string, extraParams: Record<string, string> = {}): Promise<T[]> {
-  const limit = 500;
+async function fetchAllPages<T>(
+  path: string,
+  extraParams: Record<string, string> = {},
+  pageSize = 500,
+): Promise<T[]> {
+  const limit = pageSize;
   const items: T[] = [];
   for (let offset = 0; offset < 20000; offset += limit) {
     const params = new URLSearchParams({ ...extraParams, limit: String(limit), offset: String(offset) });
@@ -1187,7 +1191,7 @@ export function uploadFormFile(
 }
 
 export async function fetchFormFiles(): Promise<FormFile[]> {
-  const rows = await fetchAllPages<FormFileDto>('/forms/files');
+  const rows = await fetchAllPages<FormFileDto>('/forms/files', {}, 200);
   return rows.map(mapFormFile);
 }
 
@@ -1294,9 +1298,13 @@ export async function fetchFormSubmissions(params: {
   templateId?: string;
   employeeId?: string;
 } = {}): Promise<FormSubmission[]> {
-  const rows = await fetchAllPages<FormSubmissionDto>('/forms/submissions', {
-    ...(params.templateId ? { template_id: params.templateId } : {}),
-    ...(params.employeeId ? { employee_id: params.employeeId } : {}),
-  });
+  const rows = await fetchAllPages<FormSubmissionDto>(
+    '/forms/submissions',
+    {
+      ...(params.templateId ? { template_id: params.templateId } : {}),
+      ...(params.employeeId ? { employee_id: params.employeeId } : {}),
+    },
+    200,
+  );
   return rows.map(mapFormSubmission);
 }

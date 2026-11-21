@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.core.security import EDITOR_ROLES, get_current_user, require_role
+from app.core.security import DOCUMENT_EDITOR_ROLES, get_current_user, require_role
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.common import Page
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/forms", tags=["forms"])
 def upload_file(
     file: UploadFile = File(..., description="PDF / Word / Excel / PNG / JPEG (max 20MB)"),
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> FormFileOut:
     record = service.store_file(db, file, actor)
     return FormFileOut.model_validate(record)
@@ -87,7 +87,7 @@ def download_file(
 def delete_file(
     file_id: str,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> None:
     service.deactivate_file(db, file_id, actor)
 
@@ -101,7 +101,7 @@ def delete_file(
 def create_template(
     payload: TemplateCreate,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> TemplateOut:
     return TemplateOut.model_validate(service.create_template(db, payload, actor))
 
@@ -140,7 +140,7 @@ def update_template(
     template_id: str,
     payload: TemplateUpdate,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> TemplateOut:
     return TemplateOut.model_validate(service.update_template(db, template_id, payload, actor))
 
@@ -149,7 +149,7 @@ def update_template(
 def delete_template(
     template_id: str,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> None:
     service.deactivate_template(db, template_id, actor)
 
@@ -163,7 +163,7 @@ def delete_template(
 def create_submission(
     payload: SubmissionCreate,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_role(*EDITOR_ROLES)),
+    actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> SubmissionOut:
     return SubmissionOut.model_validate(service.create_submission(db, payload, actor))
 

@@ -25,6 +25,7 @@ from app.models.attendance import Attendance
 from app.models.device import BiometricPunch, ZktecoDevice
 from app.models.employee import Employee
 from app.models.user import User
+from app.services import settings as work_settings_service
 from app.services.audit import record_audit
 from app.utils.ids import new_id
 
@@ -49,8 +50,17 @@ SHIFT_WINDOWS: dict[str, ShiftWindow] = {
 }
 
 
-def shift_window(shift: str | None) -> ShiftWindow:
-    return SHIFT_WINDOWS.get(shift or "", SHIFT_WINDOWS["NORMAL_DAY"])
+def shift_window(
+    shift: str | None,
+    windows: dict[str, tuple[int, int, bool]] | None = None,
+) -> ShiftWindow:
+    """Return the effective shift window; DB settings override the constants."""
+    source = windows if windows is not None else {
+        name: (w.start_minutes, w.end_minutes, w.crosses_midnight)
+        for name, w in SHIFT_WINDOWS.items()
+    }
+    start, end, crosses = source.get(shift or "", source["NORMAL_DAY"])
+    return ShiftWindow(start, end, crosses)
 
 
 def business_date(punch: datetime, window: ShiftWindow) -> date:
@@ -76,7 +86,12 @@ class DaySummary:
     early_leave_minutes: int
 
 
-def summarize_day(punches: list[datetime], window: ShiftWindow) -> DaySummary:
+def summarize_day(
+    punches: list[datetime],
+    window: ShiftWindow,
+    late_grace: int | None = None,
+    early_grace: int | None = None,
+) -> DaySummary:
     """Turn all punches of one business day into check-in/out and HR metrics."""
     ordered = sorted(punches)
     first = ordered[0]
@@ -96,11 +111,13 @@ def summarize_day(punches: list[datetime], window: ShiftWindow) -> DaySummary:
     early = max(0, window.end_minutes - out_minutes) if has_check_out else 0
     overtime = max(0, out_minutes - window.end_minutes) if has_check_out else 0
 
+    late_limit = LATE_GRACE_MINUTES if late_grace is None else late_grace
+    early_limit = EARLY_LEAVE_GRACE_MINUTES if early_grace is None else early_grace
     if overtime > 0:
         status = "إضافي"
-    elif late > LATE_GRACE_MINUTES:
+    elif late > late_limit:
         status = "متأخر"
-    elif early > EARLY_LEAVE_GRACE_MINUTES:
+    elif early > early_limit:
         status = "انصراف مبكر"
     else:
         status = "حاضر"
@@ -148,6 +165,9 @@ def process_punches(
 ) -> ProcessingStats:
     stats = ProcessingStats()
     groups: dict[tuple[str, date], list[datetime]] = defaultdict(list)
+    # Read the singleton once per batch; never per punch or per employee.
+    configured = work_settings_service.get_work_settings(db)
+    windows = configured.shift_windows()
 
     for punch in punches:
         if punch.ignored_at is not None:
@@ -157,14 +177,18 @@ def process_punches(
         if employee is None:
             stats.unknown += 1
             continue
-        window = shift_window(employee.default_shift)
+        window = shift_window(employee.default_shift, windows)
         groups[(employee.employee_id, business_date(punch.punch_time, window))].append(
             punch.punch_time
         )
 
     for (employee_id, day), times in sorted(groups.items()):
         employee = employees[employee_id]
-        summary = summarize_day(times, shift_window(employee.default_shift))
+        summary = summarize_day(
+            times,
+            shift_window(employee.default_shift, windows),
+            late_grace=configured.late_grace_minutes,
+        )
         outcome = _upsert_attendance(db, employee, day, summary, device, actor)
         setattr(stats, outcome, getattr(stats, outcome) + 1)
 

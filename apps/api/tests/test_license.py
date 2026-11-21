@@ -16,6 +16,10 @@ def test_license_status_is_reported_without_blocking(client: TestClient, monkeyp
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "unconfigured"
+    assert body["source"] in {"none", "env"}
+    assert body["client_name"] is None
+    assert body["issued_on"] is None
+    assert body["hardware_matches"] is None
     assert body["enforced"] is False
     assert body["license_key_present"] is False
 
@@ -26,6 +30,7 @@ def test_active_license_reports_days_remaining(client: TestClient, monkeypatch) 
     headers = login(client)
     body = client.get("/api/license/status", headers=headers).json()
     assert body["status"] == "active"
+    assert body["source"] == "env"
     assert body["license_key_present"] is True
     assert body["expires_on"] == "2099-12-31"
     assert body["days_remaining"] > 0

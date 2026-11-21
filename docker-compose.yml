@@ -50,6 +50,11 @@ services:
       SEED_DEMO_ON_START: ${SEED_DEMO_ON_START:-false}
       DEMO_MODE: ${DEMO_MODE:-true}
       LIBREOFFICE_BIN: ${LIBREOFFICE_BIN:-/usr/bin/libreoffice}
+      # ONLYOFFICE (Phase 3 uses these). Internal service names only: the editor
+      # is never reached from the API through the public host.
+      ONLYOFFICE_INTERNAL_URL: http://onlyoffice
+      ONLYOFFICE_INTERNAL_HOST: onlyoffice
+      ONLYOFFICE_CALLBACK_BASE: http://api:8000
       # The worker owns device polling so a terminal is never polled twice.
       ZK_SYNC_ENABLED: "false"
     volumes:
@@ -67,6 +72,56 @@ services:
       start_period: 30s
     networks:
       - smd
+      - office_internal
+
+  # -------------------------------------------------------------------------
+  # ONLYOFFICE Document Server (Phase 2).
+  #
+  #   * No published ports: the browser reaches the editor only through the
+  #     nginx same-origin proxy at /onlyoffice/ on the web container.
+  #   * Attached ONLY to the internal network, so it cannot reach the internet
+  #     or any service outside smd-hr (db is not on this network either).
+  #   * Volumes persist the editor cache/history; uploads + PostgreSQL remain
+  #     the source of truth for company documents.
+  # -------------------------------------------------------------------------
+  onlyoffice:
+    build:
+      context: ./infra/onlyoffice
+      args:
+        ONLYOFFICE_IMAGE: ${ONLYOFFICE_IMAGE:-onlyoffice/documentserver:10.0.0.1}
+    image: smd-hr-onlyoffice:latest
+    container_name: smd-hr-onlyoffice
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?ONLYOFFICE_JWT_SECRET must be set in .env}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "true"
+      # Regenerate AllFonts.js at start so the vendored Cairo family is listed.
+      GENERATE_FONTS: "true"
+      # DS refuses to fetch from or post to private IP addresses by default
+      # (request-filtering-agent). Both the document URL and the callback URL
+      # point at http://api:8000 on the internal Docker bridge, so this must be
+      # enabled or every edit session fails with "download failed".
+      # ALLOW_META_IP_ADDRESS (169.254.x.x) intentionally stays false.
+      # The container is on an `internal: true` network with no route out, and
+      # all URLs it receives are built and signed by our API.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      TZ: ${TZ:-Africa/Cairo}
+    volumes:
+      - oo_data:/var/www/onlyoffice/Data
+      - oo_logs:/var/log/onlyoffice
+      - oo_lib:/var/lib/onlyoffice
+      - oo_db:/var/lib/postgresql
+      - oo_rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/healthcheck | grep -q true"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    networks:
+      - office_internal
 
   worker:
     build:
@@ -113,6 +168,10 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
         VITE_ALLOW_OFFLINE_DEMO: ${VITE_ALLOW_OFFLINE_DEMO:-false}
+        # Phase 2 wires the flags through so Phase 4 only flips the values.
+        VITE_ONLYOFFICE_ENABLED: ${VITE_ONLYOFFICE_ENABLED:-false}
+        VITE_ONLYOFFICE_URL: ${VITE_ONLYOFFICE_URL:-/onlyoffice}
+        VITE_OFFICE_LOAD_TIMEOUT_MS: ${VITE_OFFICE_LOAD_TIMEOUT_MS:-20000}
     image: smd-hr-web:latest
     container_name: smd-hr-web
     restart: unless-stopped
@@ -121,14 +180,30 @@ services:
     depends_on:
       api:
         condition: service_started
+      # nginx resolves `proxy_pass http://onlyoffice/` at config load time, so
+      # the editor container must exist (and be started) before nginx boots.
+      onlyoffice:
+        condition: service_started
     networks:
       - smd
+      - office_internal
 
 volumes:
   db_data:
   uploads:
   backups:
+  # ONLYOFFICE cache/history. Not a source of truth: uploads + PostgreSQL are.
+  oo_data:
+  oo_logs:
+  oo_lib:
+  oo_db:
+  oo_rabbitmq:
 
 networks:
   smd:
     driver: bridge
+  # No route to the internet and no published ports: DS is reachable only by
+  # nginx (web) and the API on this internal bridge.
+  office_internal:
+    driver: bridge
+    internal: true
