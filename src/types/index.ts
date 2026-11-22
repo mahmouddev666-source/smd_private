@@ -361,3 +361,104 @@ export interface LicenseConfig {
   maxEmployees: number;
   lastVerifiedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4: server-backed license status, work settings and ONLYOFFICE
+// ---------------------------------------------------------------------------
+
+/** Read-only view of `GET /api/license/status`; never contains secrets. */
+export interface LicenseStatus {
+  status: string;
+  mode: 'demo' | 'production';
+  source: string;
+  licenseKeyPresent: boolean;
+  clientName: string | null;
+  issuedOn: string | null;
+  expiresOn: string | null;
+  daysRemaining: number | null;
+  hardwareMatches: boolean | null;
+  enforced: boolean;
+  message: string;
+  checkedAt: string;
+}
+
+/** Camel-case view of `GET/PATCH /api/settings/work`. */
+export interface WorkSettings {
+  id: number;
+  timezone: string;
+  normalStart: string;
+  normalEnd: string;
+  dayStart: string;
+  dayEnd: string;
+  nightStart: string;
+  nightEnd: string;
+  overtimeDayStart: string;
+  overtimeCutoff: string;
+  overtimeDayMultiplier: number;
+  overtimeNightMultiplier: number;
+  lateGraceMinutes: number;
+  version: number;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Editable subset sent back to the API, including the optimistic-lock token. */
+export interface WorkSettingsPatch {
+  timezone: string;
+  normalStart: string;
+  normalEnd: string;
+  dayStart: string;
+  dayEnd: string;
+  nightStart: string;
+  nightEnd: string;
+  overtimeDayStart: string;
+  overtimeCutoff: string;
+  overtimeDayMultiplier: number;
+  overtimeNightMultiplier: number;
+  lateGraceMinutes: number;
+  expectedVersion: number;
+}
+
+export interface OfficeStatus {
+  enabled: boolean;
+  available: boolean;
+  documentserverVersion: string | null;
+  checkedAt: string;
+}
+
+export interface OfficeEditorSession {
+  id: string;
+  expiresAt: string;
+}
+
+export interface OfficeEditorVersion {
+  id: string;
+  number: number;
+  extension: string;
+  isOriginal: boolean;
+  checksum: string;
+}
+
+/** The signed config is opaque to the UI; only the wrapper fields are typed. */
+export interface OfficeEditorConfig {
+  documentServerUrl: string;
+  session: OfficeEditorSession;
+  version: OfficeEditorVersion;
+  config: Record<string, unknown>;
+}
+
+export interface OfficeFileVersion {
+  id: string;
+  number: number;
+  source: string;
+  isOriginal: boolean;
+  extension: string;
+  sizeBytes: number;
+  checksum: string;
+  createdAt: string;
+  createdBy: string | null;
+  createdByName: string | null;
+  pdfStatus: string;
+  parentVersionId: string | null;
+}

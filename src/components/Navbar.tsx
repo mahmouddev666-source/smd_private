@@ -11,7 +11,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { UserSession } from '../types';
+import { UserRole, UserSession } from '../types';
+import { isAdmin } from '../utils/roles';
 import {
   LayoutDashboard,
   Users,
@@ -26,6 +27,7 @@ import {
   Lock,
   LogOut,
   Menu,
+  Settings,
   ShieldAlert,
   ShieldCheck,
   X,
@@ -41,6 +43,7 @@ export type ActiveTab =
   | 'zkteco'
   | 'reports'
   | 'forms'
+  | 'settings'
   | 'architecture'
   | 'licensing';
 
@@ -61,6 +64,8 @@ interface NavItem {
   id: ActiveTab;
   label: string;
   icon: React.ElementType;
+  /** Omitted means every role; used for ADMIN-only and HR/Admin-only tabs. */
+  allowedRoles?: UserRole[];
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -73,7 +78,18 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'zkteco', label: 'أجهزة ZKTeco', icon: Cpu },
   { id: 'reports', label: 'التقارير والتحليلات', icon: BarChart3 },
   { id: 'forms', label: 'النماذج والمستندات', icon: FileText },
-  { id: 'architecture', label: 'المعمارية و SQL', icon: Database },
+  {
+    id: 'settings',
+    label: 'إعدادات الورديات',
+    icon: Settings,
+    allowedRoles: ['ADMIN', 'HR'],
+  },
+  {
+    id: 'architecture',
+    label: 'المعمارية و SQL',
+    icon: Database,
+    allowedRoles: ['ADMIN'],
+  },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -148,9 +164,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </div>
   );
 
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) =>
+      (!item.allowedRoles || item.allowedRoles.includes(user.role)) &&
+      (item.id !== 'architecture' || isAdmin(user.role)),
+  );
+
   const renderNavigation = () => (
     <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-1" aria-label="أقسام النظام">
-      {NAV_ITEMS.map((item) => {
+      {visibleNavItems.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.id;
         return (

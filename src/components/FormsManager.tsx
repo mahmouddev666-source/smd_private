@@ -43,12 +43,20 @@ import {
   FormSubmission,
   FormTemplate,
   LeaveRecord,
+  OfficeStatus,
   MissionRecord,
   PermitRecord,
   UserSession,
 } from '../types';
 import { apiFormStore, FormStore, getDemoFormStore } from '../services/formStore';
+import * as api from '../services/apiClient';
 import { canEdit } from '../utils/roles';
+import {
+  canUseOfficeEditor,
+  isOfficeEditableFile,
+  shouldFallBackToLegacyPreview,
+} from '../utils/office';
+import { OfficeEditor } from './OfficeEditor';
 import { FormDocumentViewer } from './forms/FormDocumentViewer';
 import { FormDesigner } from './forms/FormDesigner';
 import { FormFiller } from './forms/FormFiller';
@@ -149,6 +157,10 @@ export const FormsManager: React.FC<FormsManagerProps> = ({
 }) => {
   const editor = canEdit(user.role);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Build-time switch. Kept false by default; a failed/absent health check
+  // never enables the button, so the legacy preview remains the safe default.
+  const officeFlagEnabled =
+    (import.meta.env.VITE_ONLYOFFICE_ENABLED as string | undefined) === 'true';
 
   // Real server when available; otherwise the temporary browser store, but only
   // when the build allows it. `null` means the engine is unavailable here.
@@ -172,9 +184,37 @@ export const FormsManager: React.FC<FormsManagerProps> = ({
   const [pendingDeleteFile, setPendingDeleteFile] = useState<FormFile | null>(null);
   const [pendingDeleteTemplate, setPendingDeleteTemplate] = useState<FormTemplate | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [officeStatus, setOfficeStatus] = useState<OfficeStatus | null>(null);
+  const [officeEditorState, setOfficeEditorState] = useState<PreviewState | null>(null);
   const [designer, setDesigner] = useState<FormTemplate | null>(null);
   const [filler, setFiller] = useState<FormTemplate | null>(null);
   const [templateModal, setTemplateModal] = useState<TemplateModalState | null>(null);
+
+  const officeEditAllowed = canUseOfficeEditor({
+    role: user.role,
+    flagEnabled: officeFlagEnabled,
+    apiEnabled,
+    status: officeStatus,
+  });
+
+  useEffect(() => {
+    if (!officeFlagEnabled || !apiEnabled) {
+      setOfficeStatus(null);
+      return;
+    }
+    let active = true;
+    api
+      .fetchOfficeStatus()
+      .then((status) => {
+        if (active) setOfficeStatus(status);
+      })
+      .catch(() => {
+        if (active) setOfficeStatus(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [officeFlagEnabled, apiEnabled]);
 
   // -------------------------------------------------------------------------
   // Loading
@@ -355,6 +395,21 @@ export const FormsManager: React.FC<FormsManagerProps> = ({
   };
 
   const openPreviewForFile = (file: FormFile) => setPreview({ file });
+
+  const openOfficeEditor = (state: PreviewState) => {
+    setError(null);
+    setPreview(null);
+    setOfficeEditorState(state);
+  };
+
+  const handleOfficeFallback = (reason: string) => {
+    const state = officeEditorState;
+    setOfficeEditorState(null);
+    // Phase 4E: the old preview is always reachable when the editor is absent
+    // or failed, including when the user entered from a template preview.
+    if (state && shouldFallBackToLegacyPreview(true, true)) setPreview(state);
+    setNotice(reason);
+  };
 
   const openPreviewForTemplate = (template: FormTemplate) => {
     const file = fileById.get(template.fileId);
@@ -635,7 +690,18 @@ export const FormsManager: React.FC<FormsManagerProps> = ({
                         {formatDate(file.createdAt)}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      {officeEditAllowed && isOfficeEditableFile(file) && (
+                        <button
+                          onClick={() => openOfficeEditor({ file })}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200"
+                          title="تحرير المستند عبر ONLYOFFICE"
+                          aria-label={`تحرير المستند ${file.originalName}`}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          تحرير المستند
+                        </button>
+                      )}
                       <button
                         onClick={() => openPreviewForFile(file)}
                         className="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg"
@@ -782,7 +848,20 @@ export const FormsManager: React.FC<FormsManagerProps> = ({
           file={preview.file}
           template={preview.template}
           loadBlob={store.downloadFile}
+          canEditOffice={
+            officeEditAllowed && isOfficeEditableFile(preview.file)
+          }
+          onEditOffice={() => openOfficeEditor(preview)}
           onClose={() => setPreview(null)}
+        />
+      )}
+
+      {/* ONLYOFFICE editor (optional, server-backed) */}
+      {officeEditorState && (
+        <OfficeEditor
+          file={officeEditorState.file}
+          onClose={() => setOfficeEditorState(null)}
+          onFallback={handleOfficeFallback}
         />
       )}
 
@@ -883,11 +962,15 @@ function FormPreviewModal({
   file,
   template,
   loadBlob,
+  canEditOffice = false,
+  onEditOffice,
   onClose,
 }: {
   file: FormFile;
   template?: FormTemplate;
   loadBlob: (fileId: string) => Promise<Blob>;
+  canEditOffice?: boolean;
+  onEditOffice?: () => void;
   onClose: () => void;
 }) {
   const [page, setPage] = useState(1);
@@ -916,6 +999,16 @@ function FormPreviewModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {canEditOffice && onEditOffice && (
+              <button
+                onClick={onEditOffice}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-blue-800 hover:bg-blue-700"
+                title="فتح المستند في محرر ONLYOFFICE"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                تحرير المستند
+              </button>
+            )}
             <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
               <button
                 onClick={() => setPage((current) => Math.max(1, current - 1))}

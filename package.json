@@ -16,6 +16,7 @@
     "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
+    "@onlyoffice/document-editor-react": "^2.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "lucide-react": "^0.546.0",

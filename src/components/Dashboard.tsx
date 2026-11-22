@@ -8,9 +8,11 @@ import {
   Employee, 
   AttendanceRecord, 
   LeaveBalance, 
+  LicenseStatus,
   ZKTecoDevice,
   UserSession 
 } from '../types';
+import { presentLicenseStatus, LicenseTone } from '../utils/license';
 import { 
   Users, 
   Clock, 
@@ -22,7 +24,9 @@ import {
   AlertCircle,
   Building,
   CheckCircle2,
-  ChevronLeft
+  ChevronLeft,
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 import { exportLeaveBalancesToExcel, exportAttendanceToExcel } from '../utils/fileExport';
 import { localDateISO, monthKey } from '../utils/dateUtils';
@@ -33,6 +37,11 @@ interface DashboardProps {
   leaveBalances: LeaveBalance[];
   devices: ZKTecoDevice[];
   user: UserSession;
+  /** Read-only server status from `GET /api/license/status` (API mode only). */
+  licenseStatus?: LicenseStatus | null;
+  licenseStatusLoading?: boolean;
+  licenseStatusError?: string | null;
+  appMode?: 'api' | 'demo';
   onSelectEmployee: (employeeId: string) => void;
   onNavigateTab: (tab: any) => void;
 }
@@ -43,6 +52,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   leaveBalances,
   devices,
   user,
+  licenseStatus = null,
+  licenseStatusLoading = false,
+  licenseStatusError = null,
+  appMode = 'api',
   onSelectEmployee,
   onNavigateTab
 }) => {
@@ -62,6 +75,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalOTPay = monthAttendance.reduce((sum, a) => sum + (a.totalOvertimePay || 0), 0);
 
   const connectedDevicesCount = devices.filter(d => d.status === 'connected').length;
+
+  const licenseView = presentLicenseStatus(licenseStatus, appMode);
+  const licenseToneClasses: Record<LicenseTone, string> = {
+    active: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    expiring: 'border-amber-200 bg-amber-50 text-amber-900',
+    expired: 'border-rose-200 bg-rose-50 text-rose-900',
+    unknown: 'border-slate-200 bg-white text-slate-700',
+  };
+  const LicenseIcon = licenseView.tone === 'unknown' ? ShieldAlert : ShieldCheck;
+  const licenseDetail = licenseStatusError || licenseView.detail;
 
   const empMap = new Map(employees.map(e => [e.employeeId, e]));
 
@@ -112,6 +135,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Phase 4C: read-only licence status from the signed server endpoint */}
+      <div
+        role="status"
+        className={`p-3 rounded-xl border text-xs font-semibold flex flex-wrap items-center justify-between gap-3 ${licenseToneClasses[licenseView.tone]}`}
+      >
+        <div className="flex items-start gap-2 min-w-0">
+          <LicenseIcon className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <span className="font-black">{licenseView.label}</span>
+            <span className="block text-[11px] font-medium opacity-90 mt-0.5">
+              {licenseStatusLoading ? 'جارٍ قراءة حالة الترخيص من الخادم...' : licenseDetail}
+            </span>
+          </div>
+        </div>
+        {licenseView.showCountdown && licenseStatus?.daysRemaining !== null && (
+          <span className="px-2 py-1 rounded-lg bg-white/70 border border-white/60 font-mono font-bold whitespace-nowrap">
+            متبقٍ {licenseStatus?.daysRemaining} يوم
+          </span>
+        )}
       </div>
 
       {/* KPI Cards Strip */}

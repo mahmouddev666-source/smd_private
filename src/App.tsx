@@ -28,6 +28,7 @@ import {
   ZktecoSyncLog,
   UnknownPunch,
   LicenseConfig,
+  LicenseStatus,
   UserSession,
   UserRole,
 } from './types';
@@ -46,10 +47,12 @@ import { PermitsAndMissions } from './components/PermitsAndMissions';
 import { ZKTecoManagerView } from './components/ZKTecoManagerView';
 import { ReportsCenter } from './components/ReportsCenter';
 import { FormsManager } from './components/FormsManager';
+import { WorkSettingsManager } from './components/WorkSettingsManager';
 import { ArchitectureAndDbView } from './components/ArchitectureAndDbView';
 import { LicensingManager } from './components/LicensingManager';
 import { BackupAndRestoreModal } from './components/BackupAndRestoreModal';
 import { calculateOvertime } from './utils/overtimeCalculator';
+import { canEdit, isAdmin } from './utils/roles';
 import { localDateISO, localTimeString } from './utils/dateUtils';
 import { newId } from './utils/id';
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, WifiOff } from 'lucide-react';
@@ -127,6 +130,11 @@ export default function App() {
   const [syncLogs, setSyncLogs] = useState<ZktecoSyncLog[]>([]);
   const [unknownPunches, setUnknownPunches] = useState<UnknownPunch[]>([]);
   const [license, setLicense] = useState<LicenseConfig>(() => StorageService.getLicense());
+  // Server-backed licence status is read-only and never replaces the local
+  // demo licence object used by the legacy trial lock screen.
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [licenseStatusLoading, setLicenseStatusLoading] = useState(false);
+  const [licenseStatusError, setLicenseStatusError] = useState<string | null>(null);
 
   // Modals & navigation helpers
   const [selectedProfileEmpId, setSelectedProfileEmpId] = useState<string | null>(null);
@@ -247,6 +255,45 @@ export default function App() {
       cancelled = true;
     };
   }, [loadApiSnapshot, loadDemoSnapshot]);
+
+  // Phase 4C: the dashboard widget reads the signed server status only in API
+  // mode. Trial mode shows an explicitly labelled placeholder instead.
+  useEffect(() => {
+    if (mode !== 'api' || !user) {
+      setLicenseStatus(null);
+      setLicenseStatusError(null);
+      setLicenseStatusLoading(false);
+      return;
+    }
+    let active = true;
+    setLicenseStatusLoading(true);
+    setLicenseStatusError(null);
+    api
+      .fetchLicenseStatus()
+      .then((status) => {
+        if (active) setLicenseStatus(status);
+      })
+      .catch((statusError: unknown) => {
+        if (active) {
+          setLicenseStatus(null);
+          setLicenseStatusError(messageOf(statusError, 'تعذر قراءة حالة الترخيص.'));
+        }
+      })
+      .finally(() => {
+        if (active) setLicenseStatusLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [mode, user?.id]);
+
+  // Defence in depth: the sidebar hides restricted tabs, but a role change or
+  // a stale URL/state must not keep rendering a protected screen.
+  useEffect(() => {
+    const role = user?.role ?? 'VIEWER';
+    if (activeTab === 'settings' && !canEdit(role)) setActiveTab('dashboard');
+    if (activeTab === 'architecture' && !isAdmin(role)) setActiveTab('dashboard');
+  }, [activeTab, user?.role]);
 
   // ---------------------------------------------------------------------------
   // Authentication
@@ -811,6 +858,10 @@ export default function App() {
             leaveBalances={leaveBalances}
             devices={devices}
             user={user}
+            licenseStatus={licenseStatus}
+            licenseStatusLoading={licenseStatusLoading}
+            licenseStatusError={licenseStatusError}
+            appMode={mode}
             onSelectEmployee={(empId) => setSelectedProfileEmpId(empId)}
             onNavigateTab={setActiveTab}
           />
@@ -901,7 +952,11 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'architecture' && <ArchitectureAndDbView />}
+        {activeTab === 'settings' && canEdit(user.role) && (
+          <WorkSettingsManager user={user} />
+        )}
+
+        {activeTab === 'architecture' && isAdmin(user.role) && <ArchitectureAndDbView />}
 
         {activeTab === 'licensing' && mode === 'demo' && (
           <LicensingManager

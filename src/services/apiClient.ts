@@ -17,7 +17,13 @@ import {
   FormSubmission,
   FormTemplate,
   FormTemplateInput,
+  LicenseStatus,
   LeaveBalance,
+  OfficeEditorConfig,
+  OfficeFileVersion,
+  OfficeStatus,
+  WorkSettings,
+  WorkSettingsPatch,
   LeaveRecord,
   MissionRecord,
   PermitRecord,
@@ -1307,4 +1313,148 @@ export async function fetchFormSubmissions(params: {
     200,
   );
   return rows.map(mapFormSubmission);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: license status, work settings and ONLYOFFICE editor
+// ---------------------------------------------------------------------------
+
+interface LicenseStatusDto {
+  status: string;
+  mode: string;
+  source: string;
+  license_key_present: boolean;
+  client_name: string | null;
+  issued_on: string | null;
+  expires_on: string | null;
+  days_remaining: number | null;
+  hardware_matches: boolean | null;
+  enforced: boolean;
+  message: string;
+  checked_at: string;
+}
+
+function mapLicenseStatus(dto: LicenseStatusDto): LicenseStatus {
+  return {
+    status: dto.status,
+    mode: dto.mode === 'demo' ? 'demo' : 'production',
+    source: dto.source,
+    licenseKeyPresent: dto.license_key_present,
+    clientName: dto.client_name,
+    issuedOn: dto.issued_on,
+    expiresOn: dto.expires_on,
+    daysRemaining: dto.days_remaining,
+    hardwareMatches: dto.hardware_matches,
+    enforced: dto.enforced,
+    message: dto.message,
+    checkedAt: dto.checked_at,
+  };
+}
+
+export async function fetchLicenseStatus(): Promise<LicenseStatus> {
+  return mapLicenseStatus(await request<LicenseStatusDto>('/license/status'));
+}
+
+interface WorkSettingsDto {
+  id: number;
+  timezone: string;
+  normal_start: string;
+  normal_end: string;
+  day_start: string;
+  day_end: string;
+  night_start: string;
+  night_end: string;
+  overtime_day_start: string;
+  overtime_cutoff: string;
+  overtime_day_multiplier: number;
+  overtime_night_multiplier: number;
+  late_grace_minutes: number;
+  version: number;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapWorkSettings(dto: WorkSettingsDto): WorkSettings {
+  return {
+    id: dto.id,
+    timezone: dto.timezone,
+    normalStart: dto.normal_start,
+    normalEnd: dto.normal_end,
+    dayStart: dto.day_start,
+    dayEnd: dto.day_end,
+    nightStart: dto.night_start,
+    nightEnd: dto.night_end,
+    overtimeDayStart: dto.overtime_day_start,
+    overtimeCutoff: dto.overtime_cutoff,
+    overtimeDayMultiplier: dto.overtime_day_multiplier,
+    overtimeNightMultiplier: dto.overtime_night_multiplier,
+    lateGraceMinutes: dto.late_grace_minutes,
+    version: dto.version,
+    updatedBy: dto.updated_by,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+export async function fetchWorkSettings(): Promise<WorkSettings> {
+  return mapWorkSettings(await request<WorkSettingsDto>('/settings/work'));
+}
+
+export async function patchWorkSettings(payload: WorkSettingsPatch): Promise<WorkSettings> {
+  const dto = await request<WorkSettingsDto>('/settings/work', {
+    method: 'PATCH',
+    body: {
+      timezone: payload.timezone,
+      normal_start: payload.normalStart,
+      normal_end: payload.normalEnd,
+      day_start: payload.dayStart,
+      day_end: payload.dayEnd,
+      night_start: payload.nightStart,
+      night_end: payload.nightEnd,
+      overtime_day_start: payload.overtimeDayStart,
+      overtime_cutoff: payload.overtimeCutoff,
+      overtime_day_multiplier: payload.overtimeDayMultiplier,
+      overtime_night_multiplier: payload.overtimeNightMultiplier,
+      late_grace_minutes: payload.lateGraceMinutes,
+      expected_version: payload.expectedVersion,
+    },
+  });
+  return mapWorkSettings(dto);
+}
+
+/** Capability probe; a failed probe simply hides the editor button. */
+export async function fetchOfficeStatus(): Promise<OfficeStatus> {
+  return request<OfficeStatus>('/office/status');
+}
+
+/** Returns a signed, short-lived editor config (server is the authority). */
+export async function fetchOfficeConfig(
+  fileId: string,
+  versionId?: string,
+): Promise<OfficeEditorConfig> {
+  const query = versionId ? `?version_id=${encodeURIComponent(versionId)}` : '';
+  return request<OfficeEditorConfig>(
+    `/office/config/${encodeURIComponent(fileId)}${query}`,
+  );
+}
+
+export interface OfficeVersionList {
+  items: OfficeFileVersion[];
+  total: number;
+}
+
+export async function fetchOfficeVersions(fileId: string): Promise<OfficeVersionList> {
+  return request<OfficeVersionList>(`/office/files/${encodeURIComponent(fileId)}/versions`);
+}
+
+/** Best-effort session release when the user closes the editor modal. */
+export async function closeOfficeSession(
+  fileId: string,
+  reason: 'forced' | 'expired' = 'forced',
+): Promise<void> {
+  await request<void>(`/office/files/${encodeURIComponent(fileId)}/sessions/close`, {
+    method: 'POST',
+    body: { reason },
+  });
 }
