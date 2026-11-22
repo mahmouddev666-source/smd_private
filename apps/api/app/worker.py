@@ -17,13 +17,19 @@ import threading
 import time
 from datetime import datetime
 
+from sqlalchemy import select
+
 from app.core.config import settings
-from app.services import backup, scheduler
+from app.db.session import SessionLocal
+from app.models.form import FormSubmission
+from app.services import backup, forms as forms_service, scheduler
 
 logger = logging.getLogger("smd_hr.worker")
 
 # Never spin faster than this, even if WORKER_TICK_SECONDS is misconfigured.
 MIN_TICK_SECONDS = 10
+# Snapshot retries are cheap; they do not wait for the slower ZK/backup timers.
+SNAPSHOT_INTERVAL_SECONDS = 30
 
 
 def _seconds_until_next_sync() -> float:
@@ -64,15 +70,53 @@ def _backup_once() -> None:
         logger.exception("Scheduled backup failed")
 
 
+def _snapshot_once() -> None:
+    """Retry unfinished submission snapshots (max 3 attempts per submission).
+
+    A single broken snapshot must never stop ZKTeco syncing or backups.
+    """
+    if not settings.submission_snapshot_enabled:
+        logger.debug("Submission snapshots disabled (SUBMISSION_SNAPSHOT_ENABLED=false)")
+        return
+
+    db = SessionLocal()
+    try:
+        pending = db.scalars(
+            select(FormSubmission)
+            .where(
+                FormSubmission.snapshot_status.in_(("pending", "failed")),
+                FormSubmission.snapshot_attempts < forms_service.SNAPSHOT_MAX_ATTEMPTS,
+            )
+            .order_by(FormSubmission.created_at)
+        ).all()
+        for submission in pending:
+            try:
+                forms_service.process_snapshot(db, submission.id)
+                logger.info(
+                    "Snapshot %s -> %s (attempt %s)",
+                    submission.id[:8],
+                    submission.snapshot_status,
+                    submission.snapshot_attempts,
+                )
+            except Exception:  # noqa: BLE001 - keep the loop alive
+                logger.exception("Snapshot retry failed for %s", submission.id[:8])
+                db.rollback()
+    except Exception:  # noqa: BLE001 - a DB outage must not stop the worker
+        logger.exception("Snapshot scan failed")
+    finally:
+        db.close()
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     logger.info(
-        "Worker started (zk_sync=%s, backups=%s, tz=%s)",
+        "Worker started (zk_sync=%s, backups=%s, snapshots=%s, tz=%s)",
         settings.zk_sync_enabled,
         settings.backup_enabled,
+        settings.submission_snapshot_enabled,
         settings.tz,
     )
 
@@ -93,6 +137,7 @@ def main() -> None:
     tick = max(MIN_TICK_SECONDS, settings.worker_tick_seconds)
     next_sync = time.monotonic()
     next_backup = time.monotonic()
+    next_snapshot = time.monotonic()
 
     while not stop.is_set():
         now = time.monotonic()
@@ -102,6 +147,9 @@ def main() -> None:
         if now >= next_backup:
             _backup_once()
             next_backup = time.monotonic() + _seconds_until_next_backup()
+        if now >= next_snapshot:
+            _snapshot_once()
+            next_snapshot = time.monotonic() + SNAPSHOT_INTERVAL_SECONDS
         stop.wait(tick)
 
     logger.info("Worker stopped at %s", datetime.now().isoformat(timespec="seconds"))

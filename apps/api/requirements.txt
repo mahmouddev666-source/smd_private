@@ -12,6 +12,12 @@ email-validator==2.2.0
 # ZKTeco LAN connector (imported lazily; demo mode works without it)
 pyzk==0.9
 
+# Phase 3 T3-14: submission PDF snapshots (pinned; Pillow is a reportlab dep)
+reportlab==5.1.0
+pypdf==7.1.1
+arabic-reshaper==3.1.0
+python-bidi==0.6.12
+
 # dev / test
 pytest==8.3.4
 httpx==0.28.1

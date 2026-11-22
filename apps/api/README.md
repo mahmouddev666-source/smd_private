@@ -138,13 +138,25 @@ alembic downgrade -1                                  # تراجع خطوة
 | `GET/POST /api/devices` | أجهزة ZKTeco |
 | `POST /api/forms/files` | رفع مستند شركة (PDF/Word/Excel/صورة، حد 20MB) |
 | `GET /api/forms/files` | مكتبة المستندات المرفوعة |
-| `GET /api/forms/files/{id}/download` | معاينة/تنزيل المستند (يتطلب تسجيل الدخول) |
+| `GET /api/forms/files/{id}/download?version_id=...` | معاينة/تنزيل المستند (يمكن تثبيته على إصدار غير قابل للتعديل) |
 | `DELETE /api/forms/files/{id}` | حذف منطقي (يُرفض إذا كان مرتبطًا بقالب نشط) |
 | `GET/POST /api/forms/templates` | قوالب النماذج + حقولها (إحداثيات نسبية) |
 | `GET/PATCH/DELETE /api/forms/templates/{id}` | قراءة/تعديل/تعطيل قالب |
 | `GET/POST /api/forms/submissions` | النماذج المعبأة والمحفوظة |
+| `GET /api/forms/submissions/{id}` | تفاصيل الطلب + حالة اللقطة (`snapshot_status`) |
+| `GET /api/forms/submissions/{id}/document` | لقطة PDF ثابتة للطلب (`no-store`) |
 | `GET /api/license/status` | حالة الترخيص (ملف موقّع، بدون أسرار) |
 | `GET/PATCH /api/settings/work` | قراءة/تعديل ورديات العمل ومعاملات الإضافي (ADMIN/HR فقط) |
+
+### لقطة PDF للطلبات (T3-14…T3-16)
+
+عند حفظ طلب جديد يُعاد فورًا بـ `snapshot_status=pending`، وتُولَّد لقطة PDF في مهمة
+خلفية (`BackgroundTasks`) دون تعطيل الحفظ. اللقطة تُرسَم فوق نسخة الإصدار المثبّت
+بخط Cairo المضمّن في `app/assets/fonts/` (مع `arabic-reshaper` + `python-bidi`)
+وتُدمج مع الأصل عبر `pypdf`؛ الملف الأصلي لا يُعدَّل أبدًا. يعيد الـ worker المحاولة
+كل 30 ثانية حتى 3 محاولات (`SUBMISSION_SNAPSHOT_ENABLED=true` افتراضيًا). أي فشل يُسجَّل في
+`snapshot_error` بالعربية ولا يُفقد الطلب. يعتمد ذلك على `reportlab` و`pypdf`
+و`arabic-reshaper` و`python-bidi` المثبّتة في `requirements.txt`.
 
 توثيق تفاعلي: `http://localhost/api/docs` (عبر nginx) أو `http://localhost:8000/api/docs`.
 

@@ -12,12 +12,15 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.models.employee import Employee
-from app.models.form import FormFile, FormSubmission, FormTemplate
+from app.models.form import FormFile, FormFileVersion, FormSubmission, FormTemplate
 from app.models.user import User
 from app.schemas.form import SubmissionCreate, TemplateCreate, TemplateUpdate
-from app.services import documents, versions
+from app.services import documents, render, versions
 from app.services.audit import record_audit
 from app.utils.ids import new_id
+
+# A background retry never runs more than three times (T3-16).
+SNAPSHOT_MAX_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -137,26 +140,42 @@ def deactivate_file(db: Session, file_id: str, actor: User) -> None:
     db.commit()
 
 
-def download_target(file: FormFile) -> tuple[Path, str, str]:
-    """Return (path, download name, media type) for inline preview/print."""
-    kind = file.kind
-    if kind == "pdf":
-        relative = file.storage_path
-        media_type = "application/pdf"
-        name = f"{Path(file.original_name).stem}.pdf"
-    elif kind == "image":
-        relative = file.storage_path
-        media_type = file.mime
-        name = file.original_name
-    else:
-        if not file.converted_pdf_path:
+def download_target(
+    db: Session, file: FormFile, version_id: str | None = None
+) -> tuple[Path, str, str]:
+    """Return (path, download name, media type) for inline preview/print.
+
+    ``version_id`` pins the request to one immutable version. When omitted the
+    current version PDF is served, preserving the pre-Phase-3 contract.
+    """
+    if version_id:
+        version = versions.get_version(db, file, version_id)
+        if version.pdf_status != "ready" or not version.pdf_path:
             raise NotFoundError(
-                "النسخة المعروضة من المستند غير متاحة. أعد رفع الملف.",
-                code="FORM_FILE_PREVIEW_MISSING",
+                "معاينة هذا الإصدار غير جاهزة بعد.", code="OFFICE_VERSION_PREVIEW_MISSING"
             )
-        relative = file.converted_pdf_path
+        relative = version.pdf_path
         media_type = "application/pdf"
-        name = f"{Path(file.original_name).stem}.pdf"
+        name = f"{Path(file.original_name).stem}_v{version.version_no}.pdf"
+    else:
+        kind = file.kind
+        if kind == "pdf":
+            relative = file.storage_path
+            media_type = "application/pdf"
+            name = f"{Path(file.original_name).stem}.pdf"
+        elif kind == "image":
+            relative = file.storage_path
+            media_type = file.mime
+            name = file.original_name
+        else:
+            if not file.converted_pdf_path:
+                raise NotFoundError(
+                    "النسخة المعروضة من المستند غير متاحة. أعد رفع الملف.",
+                    code="FORM_FILE_PREVIEW_MISSING",
+                )
+            relative = file.converted_pdf_path
+            media_type = "application/pdf"
+            name = f"{Path(file.original_name).stem}.pdf"
 
     path = documents.resolve_storage_path(relative)
     if not path.exists():
@@ -213,7 +232,7 @@ def get_template(db: Session, template_id: str) -> FormTemplate:
 
 
 def create_template(db: Session, payload: TemplateCreate, actor: User) -> FormTemplate:
-    _active_file(db, payload.file_id)
+    file = _active_file(db, payload.file_id)
     template = FormTemplate(
         id=new_id(),
         name=payload.name.strip(),
@@ -224,6 +243,8 @@ def create_template(db: Session, payload: TemplateCreate, actor: User) -> FormTe
         created_by=actor.id,
         is_active=True,
         is_demo=False,
+        # Pin the layout the field percentages were designed against.
+        document_version_id=file.current_version_id,
     )
     db.add(template)
     record_audit(
@@ -329,6 +350,18 @@ def create_submission(db: Session, payload: SubmissionCreate, actor: User) -> Fo
                 f"قيمة الحقل «{key}» يجب أن تكون نصًا أو رقمًا.", code="INVALID_FORM_VALUE"
             )
 
+    # Freeze the layout version at creation time. It never changes afterwards.
+    version_id = template.document_version_id
+    if not version_id and template.file_id:
+        file = db.get(FormFile, template.file_id)
+        version_id = file.current_version_id if file else None
+    if version_id:
+        version = db.get(FormFileVersion, version_id)
+        if version is None or version.file_id != template.file_id:
+            raise ValidationError(
+                "الإصدار المثبّت للقالب غير صالح.", code="OFFICE_VERSION_NOT_FOUND"
+            )
+
     submission = FormSubmission(
         id=new_id(),
         template_id=template.id,
@@ -337,6 +370,9 @@ def create_submission(db: Session, payload: SubmissionCreate, actor: User) -> Fo
         status=payload.status,
         created_by=actor.id,
         is_demo=False,
+        document_version_id=version_id,
+        snapshot_status="pending" if settings.submission_snapshot_enabled else "none",
+        snapshot_attempts=0,
     )
     db.add(submission)
     record_audit(
@@ -350,11 +386,83 @@ def create_submission(db: Session, payload: SubmissionCreate, actor: User) -> Fo
             "employee_id": submission.employee_id,
             "status": submission.status,
             "fields_filled": len(payload.values),
+            "document_version_id": version_id,
+            "snapshot_status": submission.snapshot_status,
         },
     )
     db.commit()
     db.refresh(submission)
     return submission
+
+
+def get_submission(db: Session, submission_id: str) -> FormSubmission:
+    submission = db.get(FormSubmission, submission_id)
+    if submission is None:
+        raise NotFoundError("الطلب غير موجود.", code="FORM_SUBMISSION_NOT_FOUND")
+    return submission
+
+
+def process_snapshot(db: Session, submission_id: str) -> None:
+    """Attempt one non-blocking render; failures never raise to the caller.
+
+    Both the FastAPI background task and the retrying worker call this, so the
+    attempt counter and audit trail stay in one place.
+    """
+    submission = db.get(FormSubmission, submission_id)
+    if submission is None or submission.snapshot_status in ("ready", "none"):
+        return
+
+    submission.snapshot_attempts += 1
+    try:
+        relative, checksum = render.render_snapshot(db, submission)
+    except render.SnapshotRenderError as exc:
+        submission.snapshot_status = "failed"
+        submission.snapshot_error = exc.message[:500]
+        action = "forms.snapshot.failed"
+        after: dict[str, Any] = {"code": exc.code, "attempts": submission.snapshot_attempts}
+        if submission.snapshot_attempts >= SNAPSHOT_MAX_ATTEMPTS:
+            action = "forms.snapshot.exhausted"
+        record_audit(db, actor=None, action=action, entity="form_submission",
+                     entity_id=submission.id, after=after)
+        db.commit()
+        return
+    except Exception as exc:  # noqa: BLE001 - a bad render must not kill a worker
+        submission.snapshot_status = "failed"
+        submission.snapshot_error = "تعذّر توليد لقطة PDF لهذا الطلب. سيُعاد المحاولة لاحقًا."
+        action = "forms.snapshot.failed"
+        after = {"code": "SNAPSHOT_RENDER_FAILED", "attempts": submission.snapshot_attempts}
+        if submission.snapshot_attempts >= SNAPSHOT_MAX_ATTEMPTS:
+            action = "forms.snapshot.exhausted"
+        record_audit(db, actor=None, action=action, entity="form_submission",
+                     entity_id=submission.id, after=after)
+        db.commit()
+        return
+
+    submission.rendered_pdf_path = relative
+    submission.rendered_checksum = checksum
+    submission.snapshot_status = "ready"
+    submission.snapshot_error = None
+    record_audit(
+        db,
+        actor=None,
+        action="forms.snapshot.ready",
+        entity="form_submission",
+        entity_id=submission.id,
+        after={"checksum": checksum[:12], "attempts": submission.snapshot_attempts},
+    )
+    db.commit()
+
+
+def submission_document_target(submission: FormSubmission) -> tuple[Path, str]:
+    """Serve a completed snapshot inline; never expose the storage path."""
+    if submission.snapshot_status != "ready" or not submission.rendered_pdf_path:
+        raise NotFoundError(
+            "لقطة PDF لهذا الطلب غير جاهزة بعد.", code="SNAPSHOT_NOT_READY"
+        )
+    path = documents.resolve_storage_path(submission.rendered_pdf_path)
+    if not path.is_file():
+        raise NotFoundError("لقطة PDF لهذا الطلب مفقودة من التخزين.", code="SNAPSHOT_NOT_READY")
+    return path, f"submission-{submission.id[:8]}.pdf"
 
 
 def list_submissions(

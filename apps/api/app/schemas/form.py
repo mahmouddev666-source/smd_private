@@ -114,3 +114,9 @@ class SubmissionOut(ORMModel):
     status: str
     created_by: str | None
     created_at: datetime
+    # Wave C additions: additive only, so existing clients stay compatible.
+    document_version_id: str | None = None
+    snapshot_status: str = "none"
+    snapshot_error: str | None = None
+    snapshot_attempts: int = 0
+    rendered_checksum: str | None = None

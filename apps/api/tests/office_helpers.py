@@ -24,6 +24,18 @@ def docx_bytes(marker: bytes = b"base") -> bytes:
     return buffer.getvalue()
 
 
+def valid_pdf_bytes(text: str = "SMD-HR") -> bytes:
+    """A well-formed PDF for pypdf/readers (the ad-hoc MINIMAL_PDF is not)."""
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.drawString(72, 720, text)
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
 @pytest.fixture()
 def office_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "onlyoffice_enabled", True)
@@ -57,6 +69,7 @@ def make_file(
         ("excel", "xlsx"): documents.XLSX_MIME,
         ("excel", "xls"): documents.XLS_MIME,
         ("pdf", "pdf"): "application/pdf",
+        ("image", "png"): "image/png",
     }[(kind, extension)]
     content = data or (docx_bytes() if kind == "word" else b"%PDF-1.4 minimal")
     file = FormFile(
@@ -91,11 +104,9 @@ def make_file(
 
 
 def _write_pdf(file: FormFile, version: FormFileVersion) -> Path:
-    from tests.test_forms import MINIMAL_PDF
-
     path = Path(settings.storage_dir) / "forms" / "seed.pdf"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(MINIMAL_PDF)
+    path.write_bytes(valid_pdf_bytes())
     return path
 
 

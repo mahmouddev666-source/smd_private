@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -66,11 +66,12 @@ def get_file(
 @router.get("/files/{file_id}/download", response_class=FileResponse)
 def download_file(
     file_id: str,
+    version_id: str | None = None,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> FileResponse:
     record = service.get_file(db, file_id)
-    path, filename, media_type = service.download_target(record)
+    path, filename, media_type = service.download_target(db, record, version_id)
     return FileResponse(
         path,
         media_type=media_type,
@@ -162,10 +163,16 @@ def delete_template(
 @router.post("/submissions", response_model=SubmissionOut, status_code=status.HTTP_201_CREATED)
 def create_submission(
     payload: SubmissionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     actor: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
 ) -> SubmissionOut:
-    return SubmissionOut.model_validate(service.create_submission(db, payload, actor))
+    submission = service.create_submission(db, payload, actor)
+    # The response is sent immediately; rendering happens after it, so a slow
+    # or broken PDF pipeline can never fail the submission save.
+    if submission.snapshot_status == "pending":
+        background_tasks.add_task(service.process_snapshot, db, submission.id)
+    return SubmissionOut.model_validate(submission)
 
 
 @router.get("/submissions", response_model=Page[SubmissionOut])
@@ -185,4 +192,33 @@ def list_submissions(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/submissions/{submission_id}", response_model=SubmissionOut)
+def get_submission(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SubmissionOut:
+    return SubmissionOut.model_validate(service.get_submission(db, submission_id))
+
+
+@router.get("/submissions/{submission_id}/document", response_class=FileResponse)
+def get_submission_document(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> FileResponse:
+    submission = service.get_submission(db, submission_id)
+    path, filename = service.submission_document_target(submission)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=filename,
+        content_disposition_type="inline",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
