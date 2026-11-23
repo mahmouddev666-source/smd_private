@@ -123,11 +123,14 @@ docker compose exec api python -m app.seed --profile demo
 
 > أي تغيير في هذه القيم يتطلب تعديل `work_settings` + اختبارات + موافقة HR.
 >
-> **ملاحظة مزامنة (2026-11-23):** القيم المعتمدة أعلاه هي المرجع. نُقلت إلى جدول
-> `work_settings` (T3-19) وأصبحت قابلة للتحرير من `WorkSettingsManager.tsx`، لكن ربطها
-> الفعلي بمحرك الحساب لم يكتمل بعد: `src/utils/overtimeCalculator.ts` لا يزال يقرأ
-> الثوابت، و`attendance_processor.py` يقرأ الورديات و`late_grace_minutes` فقط.
-> لا تُغيّر القيم قبل تنفيذ المرحلة B من `tasks.md`، ولا تُحذف الثوابت قبل ربط المصدر.
+> **ملاحظة مزامنة (2026-11-23):** القيم المعتمدة أعلاه هي المرجع، وهي الآن المصدر الفعلي
+> للحساب بعد اكتمال المرحلة B من `tasks.md`. نُقلت إلى جدول `work_settings` (T3-19)،
+> ويقرأ `apps/api/app/services/overtime.py` القيم من `get_work_settings(db)`، بينما
+> يستهلك `src/utils/overtimeCalculator.ts` نفس القيم عبر `/api/settings/work` و
+> `useWorkSettings.ts`. كما يستخدم `attendance_processor.py` فاصل الإضافي والمعاملين
+> مع الورديات و`late_grace_minutes`. أي تغيير من شاشة «إعدادات الورديات» ينعكس في
+> الحاسبة والمزامنات والحسابات القادمة فقط، ولا تُعاد كتابة سجلات الحضور القديمة.
+> لا تُغيَّر القيم المعتمدة دون موافقة HR كتابية.
 
 ---
 

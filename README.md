@@ -24,11 +24,12 @@
 
 ## الوضع الحالي
 
-> ✅ المراحل 0–7 مكتملة، ومعها **ONLYOFFICE Phase 3 (Waves A/B/C) + Phase 4** مكتملة ومُلتزمة في Git. النظام جاهز للتشغيل الإنتاجي عبر Docker؛ يتبقى التحقق التشغيلي وبعض الربط النهائي المذكور في `tasks.md`.
+> ✅ المراحل 0–7 مكتملة، ومعها **ONLYOFFICE Phase 3 (Waves A/B/C) + Phase 4** و**المرحلة B** مكتملة ومُلتزمة في Git. النظام جاهز للتشغيل الإنتاجي عبر Docker؛ يتبقى التحقق التشغيلي والربط النهائي المذكور في `tasks.md`.
 
-- **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (**209/209** بعد موجات ONLYOFFICE الثلاث).
+- **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (**216/216** بعد موجات ONLYOFFICE الثلاث والمرحلة B).
 - **Docker جاهز**: `docker-compose.yml` يشغّل `db` + `api` + `web` (nginx) + `worker` (مزامنة ZKTeco + نسخ احتياطي مجدول) + `onlyoffice` (ONLYOFFICE Document Server، داخلي فقط)، بصور متعددتي المراحل وhealthchecks وvolumes دائمة.
-- **الواجهة مربوطة بالـ API** (المرحلة 3): تسجيل الدخول، الموظفون، الحضور، الإجازات والأرصدة، الأذونات والمأموريات — كلها عبر `/api`. اختبارات الواجهة: **87/87 Vitest** + **21/21 Playwright**.
+- **الواجهة مربوطة بالـ API** (المرحلة 3): تسجيل الدخول، الموظفون، الحضور، الإجازات والأرصدة، الأذونات والمأموريات — كلها عبر `/api`. اختبارات الواجهة: **94/94 Vitest** + **21/21 Playwright**.
+- **المرحلة B مكتملة**: إعدادات `work_settings` هي المصدر الفعلي لحساب الإضافي في `apps/api/app/services/overtime.py`، وتستهلكها الحاسبة عبر `/api/settings/work` و`useWorkSettings.ts`، ويستخدمها `attendance_processor.py` للمزامنات والحسابات القادمة. تعديل الفاصل أو المعاملات ينعكس فورًا دون تغيير القيم المعتمدة.
 - **قواعد العمل والتقارير** (المرحلة 6): دورة اعتماد الإجازات `قيد المراجعة → معتمد/مرفوض` بصلاحية `ADMIN/HR` فقط، خصم الرصيد مرة واحدة عند الاعتماد، منع التداخل، حدود الأذونات (ساعتان للشخصي + 4 ساعات يوميًا) وبدلات المأموريات، ومركز تقارير (حضور/إجازات/إضافي/قطاعي) بتصدير Excel وطباعة A4 عربية RTL.
 - **محرك المستندات** (المرحلة 4.1 + 4.2): رفع نماذج الشركة الأصلية (PDF/Word/Excel/صور) وتحويلها إلى PDF على الخادم، مع مكتبة وعارض صفحات (`pdf.js`) وقوالب مرتبطة بالمستند، **مصمم حقول مرئي** (سحب/تحجيم + ربط ببيانات الموظف/الإجازة/المأمورية)، و**وضع تعبئة وطباعة A4**. أُضيف لاحقًا **مولّد لقطة PDF عربية** على الخادم (`apps/api/app/services/render.py`) مع إصدارات المستند وإعادة محاولة في `worker`.
 - **ONLYOFFICE Phase 3/4 مكتمل لكن معطّل افتراضيًا**: نقاط `/api/office/*`، إصدارات المستندات، لقطة Submission، غلاف المحرر `OfficeEditor.tsx`، شاشة «إعدادات الورديات»، بطاقة حالة الترخيص، وتقييد تبويب «المعمارية» لـ `ADMIN`. المفتاحان `ONLYOFFICE_ENABLED=false` و`VITE_ONLYOFFICE_ENABLED=false`، والمعاينة القديمة (Overlay / PDF.js / `FormDesigner` / `SmartForms` / `formFileParser`) ما زالت هي المسار الافتراضي والـ fallback.
@@ -319,13 +320,13 @@ docker compose start api worker
 
 ```bash
 npm run lint                 # فحص الأنواع (tsc --noEmit)
-npm test                     # اختبارات الوحدة (Vitest) — 87/87 في 11 ملفًا
+npm test                     # اختبارات الوحدة (Vitest) — 94/94 في 12 ملفًا
 npx playwright test          # اختبارات E2E — 21/21
 npx playwright show-report   # تقرير HTML
 
 # الباك إند
 cd apps/api
-python -m pytest -o addopts= -q --tb=short   # 209/209 (SQLite in-memory)
+python -m pytest -o addopts= -q --tb=short   # 216/216 (SQLite in-memory)
 ```
 
 > اختبارات التقارير (`tests/unit/reports.spec.ts`) تغطي تجميعات الحضور والإجازات والإضافي وحصر الفترة/الإدارة/الحالة. اختبارات `leave-approval.spec.ts` تغطي دورة الاعتماد والرفض مع السبب.
