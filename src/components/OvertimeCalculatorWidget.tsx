@@ -1,33 +1,30 @@
 /**
  * SMD - Suez Methanol Derivatives Co.
- * Interactive Overtime Engine & 6:00 PM Cutoff Calculator
+ * Interactive Overtime Engine & Settings-Driven Cutoff Calculator
+ *
+ * Every displayed threshold, multiplier and shift window is read from
+ * `useOvertimeSettings()`, which mirrors the singleton `work_settings` row.
+ * The calculation itself still lives in `utils/overtimeCalculator.ts`.
  */
 
 import React, { useState } from 'react';
 import { ShiftType } from '../types';
 import { calculateOvertime, getPythonOvertimeCode } from '../utils/overtimeCalculator';
-import { 
-  Calculator, 
-  Clock, 
-  CheckCircle2, 
-  Sparkles, 
-  Code, 
-  Info, 
-  ArrowLeft,
-  DollarSign
-} from 'lucide-react';
+import { useOvertimeSettings } from '../hooks/useWorkSettings';
+import { Calculator, Clock, Code } from 'lucide-react';
 
 export const OvertimeCalculatorWidget: React.FC = () => {
+  const settings = useOvertimeSettings();
   const [shiftType, setShiftType] = useState<ShiftType>('NORMAL_DAY');
-  const [checkIn, setCheckIn] = useState<string>('08:00');
-  const [checkOut, setCheckOut] = useState<string>('20:00');
+  const [checkIn, setCheckIn] = useState<string>(settings.normalStart);
+  const [checkOut, setCheckOut] = useState<string>(settings.dayEnd);
   const [hourlyRate, setHourlyRate] = useState<number>(85.0);
   const [showCode, setShowCode] = useState<boolean>(false);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
 
   const copyPythonCode = async () => {
     try {
-      await navigator.clipboard.writeText(getPythonOvertimeCode());
+      await navigator.clipboard.writeText(getPythonOvertimeCode(settings));
       setCopyStatus('copied');
     } catch {
       setCopyStatus('error');
@@ -35,33 +32,34 @@ export const OvertimeCalculatorWidget: React.FC = () => {
     setTimeout(() => setCopyStatus('idle'), 3000);
   };
 
-  // Compute live breakdown
+  // Compute live breakdown from the current (database-backed) settings.
   const result = calculateOvertime(shiftType, checkIn, checkOut, hourlyRate);
 
-  // Quick preset test cases from the prompt
+  // Quick preset test cases from the approved HR examples.
   const applyPreset = (presetName: string) => {
     if (presetName === 'example1') {
-      // Prompt example: Normal Day (ends at 4 PM), works till 8 PM -> 2h day (1.35) + 2h night (1.70)
+      // Normal day ends at 16:00, works until 20:00 -> 2h day @1.35 + 2h night @1.70
       setShiftType('NORMAL_DAY');
-      setCheckIn('08:00');
-      setCheckOut('20:00');
+      setCheckIn(settings.normalStart);
+      setCheckOut(settings.dayEnd);
       setHourlyRate(85.0);
     } else if (presetName === 'example2') {
-      // Prompt example 2: Night Shift ends at midnight (or extending to 2 AM) -> 2h night (1.70)
+      // Night shift 20:00 -> 02:00: the shift ends at 08:00, so this is an
+      // early departure (no overtime). Kept as an honest edge-case demo.
       setShiftType('NIGHT_SHIFT');
-      setCheckIn('20:00');
+      setCheckIn(settings.nightStart);
       setCheckOut('02:00');
       setHourlyRate(85.0);
     } else if (presetName === 'day_overtime_only') {
-      // Normal Day working until 17:30 -> 1.5h day OT only @ 1.35
+      // Normal day working until 17:30 -> 1.5h day OT only.
       setShiftType('NORMAL_DAY');
-      setCheckIn('08:00');
+      setCheckIn(settings.normalStart);
       setCheckOut('17:30');
       setHourlyRate(90.0);
     } else if (presetName === 'day_shift_12h') {
-      // Day Shift 08:00 - 20:00 working until 22:00 -> 2h night OT @ 1.70
+      // Day shift ends at 20:00, works until 22:00 -> 2h night OT.
       setShiftType('DAY_SHIFT');
-      setCheckIn('08:00');
+      setCheckIn(settings.dayStart);
       setCheckOut('22:00');
       setHourlyRate(100.0);
     }
@@ -69,18 +67,20 @@ export const OvertimeCalculatorWidget: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      
       {/* Header */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <Calculator className="w-5 h-5 text-blue-700" />
             <h2 className="text-lg font-bold text-slate-900">
-              خوارزمية ومحاكي احتساب الوقت الإضافي (قاعدة الحد الفاصل 6:00 م)
+              خوارزمية ومحاكي احتساب الوقت الإضافي (الحد الفاصل {settings.overtimeCutoff})
             </h2>
           </div>
           <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            المنطق الحسابي المعتمد لشركة السويس لمشتقات الميثانول: الساعات النهارية حتى 6:00 م تحتسب بمعدل <strong>1.35</strong>، والساعات الليلية من 6:00 م حتى 6:00 ص تحتسب بمعدل <strong>1.70</strong>.
+            المنطق الحسابي المعتمد لشركة السويس لمشتقات الميثانول: الساعات النهارية حتى{' '}
+            {settings.overtimeCutoff} تحتسب بمعدل <strong>{settings.overtimeDayMultiplier}</strong>،
+            والساعات الليلية من {settings.overtimeCutoff} حتى {settings.overtimeDayStart} تحتسب بمعدل{' '}
+            <strong>{settings.overtimeNightMultiplier}</strong>.
           </p>
         </div>
 
@@ -103,32 +103,31 @@ export const OvertimeCalculatorWidget: React.FC = () => {
             onClick={() => applyPreset('example1')}
             className="px-3 py-1.5 bg-white hover:bg-blue-50 text-blue-700 hover:border-blue-300 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
           >
-            مثال 1 (المطلوب نصاً): يوم عادي (ينتهي 4م) عمل حتى 8م (ساعتان 1.35 + ساعتان 1.70)
+            مثال 1 (المطلوب نصاً): يوم عادي (ينتهي {settings.normalEnd}) عمل حتى {settings.dayEnd} (ساعتان {settings.overtimeDayMultiplier} + ساعتان {settings.overtimeNightMultiplier})
           </button>
           <button
             onClick={() => applyPreset('example2')}
             className="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 hover:border-indigo-300 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
           >
-            مثال 2 (المطلوب نصاً): وردية ليلية تمتد حتى 2 صباحاً (ساعتان ليلي 1.70)
+            مثال 2: وردية ليلية {settings.nightStart} → 02:00 (انصراف مبكر قبل نهاية الوردية — لا إضافي)
           </button>
           <button
             onClick={() => applyPreset('day_overtime_only')}
             className="px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-700 hover:border-amber-300 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
           >
-            سيناريو 3: يوم عادي يمتد حتى 5:30م (1.5 ساعة نهاري فقط قبل 6م)
+            سيناريو 3: يوم عادي يمتد حتى 5:30م (1.5 ساعة نهاري فقط قبل {settings.overtimeCutoff})
           </button>
           <button
             onClick={() => applyPreset('day_shift_12h')}
             className="px-3 py-1.5 bg-white hover:bg-purple-50 text-purple-700 hover:border-purple-300 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
           >
-            سيناريو 4: وردية نهارية (تنتهي 8م) تمتد حتى 10م (ساعتان ليلي 1.70)
+            سيناريو 4: وردية نهارية (تنتهي {settings.dayEnd}) تمتد حتى 10م (ساعتان ليلي {settings.overtimeNightMultiplier})
           </button>
         </div>
       </div>
 
       {/* Interactive Inputs & Calculation Results */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
         {/* Left Form: Inputs */}
         <div className="lg:col-span-5 bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
           <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3">
@@ -144,9 +143,15 @@ export const OvertimeCalculatorWidget: React.FC = () => {
               onChange={(e) => setShiftType(e.target.value as ShiftType)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium"
             >
-              <option value="NORMAL_DAY">يوم عمل عادي (08:00 ص - 04:00 م) - 8 ساعات</option>
-              <option value="DAY_SHIFT">وردية نهارية (08:00 ص - 08:00 م) - 12 ساعة</option>
-              <option value="NIGHT_SHIFT">وردية ليلية (08:00 م - 08:00 ص اليوم التالي) - 12 ساعة</option>
+              <option value="NORMAL_DAY">
+                يوم عمل عادي ({settings.normalStart} - {settings.normalEnd})
+              </option>
+              <option value="DAY_SHIFT">
+                وردية نهارية ({settings.dayStart} - {settings.dayEnd}) - 12 ساعة
+              </option>
+              <option value="NIGHT_SHIFT">
+                وردية ليلية ({settings.nightStart} - {settings.nightEnd} اليوم التالي) - 12 ساعة
+              </option>
             </select>
           </div>
 
@@ -194,17 +199,20 @@ export const OvertimeCalculatorWidget: React.FC = () => {
 
           {/* Dividing Line Rule Info Box */}
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-900 leading-relaxed">
-            <span className="font-bold block mb-1">⚠️ قاعدة الـ 6:00 م الصارمة (Strict 18:00 Cutoff):</span>
+            <span className="font-bold block mb-1">
+              ⚠️ قاعدة الحد الفاصل {settings.overtimeCutoff} (Strict Cutoff):
+            </span>
             <span>
-              أي عمل إضافي يقع في الفترة بين (06:00 ص إلى 06:00 م) يضرب في <strong>1.35</strong>.
-              وأي عمل إضافي يقع بين (06:00 م إلى 06:00 ص) يضرب في <strong>1.70</strong>.
+              أي عمل إضافي يقع في الفترة بين ({settings.overtimeDayStart} إلى{' '}
+              {settings.overtimeCutoff}) يضرب في <strong>{settings.overtimeDayMultiplier}</strong>.
+              وأي عمل إضافي يقع بين ({settings.overtimeCutoff} إلى{' '}
+              {settings.overtimeDayStart}) يضرب في <strong>{settings.overtimeNightMultiplier}</strong>.
             </span>
           </div>
         </div>
 
         {/* Right Panel: Mathematical Results & Breakdown */}
         <div className="lg:col-span-7 bg-white p-6 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-6">
-          
           <div>
             <h3 className="text-sm font-bold text-slate-900 mb-4 border-b border-slate-100 pb-3">
               نتائج الاحتساب المالي والزمني للإضافي
@@ -223,7 +231,9 @@ export const OvertimeCalculatorWidget: React.FC = () => {
               </div>
 
               <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <span className="text-[11px] text-amber-800 font-bold block">إضافي نهاري (1.35)</span>
+                <span className="text-[11px] text-amber-800 font-bold block">
+                  إضافي نهاري ({settings.overtimeDayMultiplier})
+                </span>
                 <span className="text-2xl font-black text-amber-900 font-mono tabular-nums">
                   {result.dayOvertimeHours} س
                 </span>
@@ -233,7 +243,9 @@ export const OvertimeCalculatorWidget: React.FC = () => {
               </div>
 
               <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
-                <span className="text-[11px] text-indigo-800 font-bold block">إضافي ليلي (1.70)</span>
+                <span className="text-[11px] text-indigo-800 font-bold block">
+                  إضافي ليلي ({settings.overtimeNightMultiplier})
+                </span>
                 <span className="text-2xl font-black text-indigo-900 font-mono tabular-nums">
                   {result.nightOvertimeHours} س
                 </span>
@@ -276,9 +288,7 @@ export const OvertimeCalculatorWidget: React.FC = () => {
             <span>نظام احتساب شركة السويس لمشتقات الميثانول SMD</span>
             <span className="font-mono">قانون العمل المصري واللائحة الداخلية</span>
           </div>
-
         </div>
-
       </div>
 
       {/* Python Code Viewer Modal / Collapse */}
@@ -305,11 +315,10 @@ export const OvertimeCalculatorWidget: React.FC = () => {
             </div>
           </div>
           <pre className="text-xs font-mono overflow-x-auto text-emerald-300 p-3 bg-slate-950 rounded-lg max-h-96" dir="ltr">
-            {getPythonOvertimeCode()}
+            {getPythonOvertimeCode(settings)}
           </pre>
         </div>
       )}
-
     </div>
   );
 };

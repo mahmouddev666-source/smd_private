@@ -2,6 +2,9 @@
 
 Rules (mirroring `src/utils/overtimeCalculator.ts`):
 
+- Shift windows, the overtime day/night boundary and both multipliers are read
+  from the singleton `work_settings` row through
+  :mod:`app.services.overtime`; nothing is hard-coded here anymore.
 - `NORMAL_DAY` 08:00 → 16:00, `DAY_SHIFT` 08:00 → 20:00: the earliest punch of
   the business day is the check-in, the latest is the check-out. A punch after
   midnight (before 04:00) belongs to the previous business day (overtime).
@@ -10,6 +13,8 @@ Rules (mirroring `src/utils/overtimeCalculator.ts`):
 - Repeated 10-minute syncs merge into the same `(employee_id, date)` row; the
   unique constraint in the database is the final guard against duplicates.
 - A manual HR record is never overwritten by biometric data.
+- Changing a setting affects future syncs only; existing rows are not rewritten
+  automatically, which keeps payroll history stable and auditable.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from app.models.attendance import Attendance
 from app.models.device import BiometricPunch, ZktecoDevice
 from app.models.employee import Employee
 from app.models.user import User
+from app.services import overtime as overtime_service
 from app.services import settings as work_settings_service
 from app.services.audit import record_audit
 from app.utils.ids import new_id
@@ -84,6 +90,8 @@ class DaySummary:
     overtime_minutes: int
     late_minutes: int
     early_leave_minutes: int
+    day_overtime_minutes: int = 0
+    night_overtime_minutes: int = 0
 
 
 def summarize_day(
@@ -91,6 +99,7 @@ def summarize_day(
     window: ShiftWindow,
     late_grace: int | None = None,
     early_grace: int | None = None,
+    rules: overtime_service.OvertimeRules | None = None,
 ) -> DaySummary:
     """Turn all punches of one business day into check-in/out and HR metrics."""
     ordered = sorted(punches)
@@ -109,7 +118,21 @@ def summarize_day(
 
     late = max(0, in_minutes - window.start_minutes)
     early = max(0, window.end_minutes - out_minutes) if has_check_out else 0
-    overtime = max(0, out_minutes - window.end_minutes) if has_check_out else 0
+
+    active_rules = rules or overtime_service.OvertimeRules.defaults()
+    overtime = 0
+    day_overtime = 0
+    night_overtime = 0
+    if has_check_out and out_minutes > window.end_minutes:
+        # Align with the calculator: time before the actual check-in is never
+        # counted as overtime (e.g. arrival 17:00 -> departure 18:00 = 1h).
+        overtime_start = max(window.end_minutes, in_minutes)
+        split = overtime_service.split_overtime_minutes(
+            overtime_start, out_minutes, active_rules
+        )
+        overtime = split.total_minutes
+        day_overtime = split.day_minutes
+        night_overtime = split.night_minutes
 
     late_limit = LATE_GRACE_MINUTES if late_grace is None else late_grace
     early_limit = EARLY_LEAVE_GRACE_MINUTES if early_grace is None else early_grace
@@ -129,6 +152,8 @@ def summarize_day(
         overtime_minutes=overtime,
         late_minutes=late,
         early_leave_minutes=early,
+        day_overtime_minutes=day_overtime,
+        night_overtime_minutes=night_overtime,
     )
 
 
@@ -168,6 +193,7 @@ def process_punches(
     # Read the singleton once per batch; never per punch or per employee.
     configured = work_settings_service.get_work_settings(db)
     windows = configured.shift_windows()
+    rules = overtime_service.OvertimeRules.from_settings(configured)
 
     for punch in punches:
         if punch.ignored_at is not None:
@@ -188,6 +214,7 @@ def process_punches(
             times,
             shift_window(employee.default_shift, windows),
             late_grace=configured.late_grace_minutes,
+            rules=rules,
         )
         outcome = _upsert_attendance(db, employee, day, summary, device, actor)
         setattr(stats, outcome, getattr(stats, outcome) + 1)
@@ -253,6 +280,9 @@ def _upsert_attendance(
             after={
                 "check_in": str(summary.check_in),
                 "check_out": str(summary.check_out),
+                "overtime_minutes": summary.overtime_minutes,
+                "day_overtime_minutes": summary.day_overtime_minutes,
+                "night_overtime_minutes": summary.night_overtime_minutes,
                 "source": "zkteco",
             },
         )
@@ -292,6 +322,9 @@ def _upsert_attendance(
         after={
             "check_in": str(check_in),
             "check_out": str(check_out),
+            "overtime_minutes": summary.overtime_minutes,
+            "day_overtime_minutes": summary.day_overtime_minutes,
+            "night_overtime_minutes": summary.night_overtime_minutes,
             "source": "zkteco",
         },
     )

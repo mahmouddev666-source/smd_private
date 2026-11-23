@@ -52,6 +52,7 @@ import { ArchitectureAndDbView } from './components/ArchitectureAndDbView';
 import { LicensingManager } from './components/LicensingManager';
 import { BackupAndRestoreModal } from './components/BackupAndRestoreModal';
 import { calculateOvertime } from './utils/overtimeCalculator';
+import { clearWorkSettings, loadWorkSettings } from './hooks/useWorkSettings';
 import { canEdit, isAdmin } from './utils/roles';
 import { localDateISO, localTimeString } from './utils/dateUtils';
 import { newId } from './utils/id';
@@ -149,6 +150,8 @@ export default function App() {
   // ---------------------------------------------------------------------------
 
   const loadDemoSnapshot = useCallback(() => {
+    // Demo mode has no server row: return the engine to approved defaults.
+    clearWorkSettings();
     StorageService.ensureDataVersion();
     const demoEmployees = StorageService.getEmployees();
     const demoDevices = StorageService.getDevices();
@@ -167,6 +170,14 @@ export default function App() {
   }, []);
 
   const loadApiSnapshot = useCallback(async () => {
+    // Phase B: `mapAttendance` computes overtime while building the snapshot,
+    // so apply the database settings first. A read failure keeps the last known
+    // values (or the approved defaults) rather than blocking the whole screen.
+    try {
+      await loadWorkSettings(true);
+    } catch {
+      /* keep previous/default settings */
+    }
     const snapshot = await api.fetchAll();
     setEmployees(snapshot.employees);
     setAttendance(snapshot.attendance);
@@ -338,6 +349,7 @@ export default function App() {
 
   const handleLogout = () => {
     api.logout();
+    clearWorkSettings();
     StorageService.setCurrentUser(null);
     setUser(null);
     setBanner(null);

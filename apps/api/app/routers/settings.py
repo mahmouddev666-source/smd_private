@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.security import DOCUMENT_EDITOR_ROLES, require_role
+from app.core.security import DOCUMENT_EDITOR_ROLES, get_current_user, require_role
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.settings import WorkSettingsOut, WorkSettingsUpdate
@@ -18,7 +18,9 @@ router = APIRouter(prefix="/settings", tags=["settings"])
     status_code=status.HTTP_200_OK,
 )
 def get_work_settings(
-    _: User = Depends(require_role(*DOCUMENT_EDITOR_ROLES)),
+    # Read-only values are needed by the overtime calculator for every signed-in
+    # role; editing them below is still restricted to ADMIN/HR.
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkSettingsOut:
     return settings_service.to_out(settings_service.get_work_settings(db))

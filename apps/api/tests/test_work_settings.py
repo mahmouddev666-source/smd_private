@@ -27,7 +27,7 @@ API_DIR = Path(__file__).resolve().parents[1]
 DAY = date(2026, 11, 12)
 
 
-def test_get_returns_approved_defaults_and_enforces_roles(client: TestClient) -> None:
+def test_get_returns_approved_defaults_to_every_authenticated_role(client: TestClient) -> None:
     body = client.get("/api/settings/work", headers=login(client, "admin")).json()
     assert body["id"] == 1
     assert body["timezone"] == "Africa/Cairo"
@@ -40,10 +40,14 @@ def test_get_returns_approved_defaults_and_enforces_roles(client: TestClient) ->
     assert body["late_grace_minutes"] == 15
     assert body["version"] == 1
 
+    # Phase B: the calculator runs for every role, so the read-only values are
+    # shared. Editing stays restricted to ADMIN/HR (asserted below and in PATCH).
     for role in ("supervisor", "viewer"):
         response = client.get("/api/settings/work", headers=login(client, role))
-        assert response.status_code == 403
-        assert response.json()["code"] == "FORBIDDEN"
+        assert response.status_code == 200
+        assert response.json()["overtime_cutoff"] == "18:00"
+
+    assert client.get("/api/settings/work").status_code == 401
 
 
 def test_patch_version_audit_and_conflict(client: TestClient, db: Session) -> None:

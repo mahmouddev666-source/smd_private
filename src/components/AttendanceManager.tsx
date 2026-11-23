@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { exportAttendanceToExcel, parseExcelFile } from '../utils/fileExport';
 import { calculateOvertime } from '../utils/overtimeCalculator';
+import { useOvertimeSettings } from '../hooks/useWorkSettings';
 import { isValidISODate, localDateISO, normalizeTime } from '../utils/dateUtils';
 import { PhotoImportModal } from './PhotoImportModal';
 import { canEdit } from '../utils/roles';
@@ -48,13 +49,14 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const userCanEdit = canEdit(user.role);
+  const settings = useOvertimeSettings();
 
   // New Record State
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.employeeId || '');
   const [date, setDate] = useState(localDateISO());
   const [shiftType, setShiftType] = useState<ShiftType>('NORMAL_DAY');
-  const [checkIn, setCheckIn] = useState('08:00');
-  const [checkOut, setCheckOut] = useState('20:00');
+  const [checkIn, setCheckIn] = useState(settings.normalStart);
+  const [checkOut, setCheckOut] = useState(settings.dayEnd);
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -257,7 +259,7 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
             سجل الحضور والانصراف والورديات
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            متابعة البصمات الواردة من ZKTeco مع استيراد الكشوف الورقية بالتصوير وتطبيق قاعدة الـ 6:00 م
+            متابعة البصمات الواردة من ZKTeco مع استيراد الكشوف الورقية بالتصوير وتطبيق قاعدة الحد الفاصل {settings.overtimeCutoff}
           </p>
         </div>
 
@@ -328,7 +330,7 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
         <PhotoImportModal
           domain="attendance"
           title="استيراد كشف الحضور والانصراف عن طريق التصوير (كاميرا / OCR)"
-          description="قم بتصوير كشف البصمات أو توقيعات الحضور الورقي، وسيقوم النظام بمسح الساعات وحساب الإضافي تلقائياً وفقاً لقاعدة الـ 6:00 م."
+          description={`قم بتصوير كشف البصمات أو توقيعات الحضور الورقي، وسيقوم النظام بمسح الساعات وحساب الإضافي تلقائياً وفقاً لقاعدة الحد الفاصل ${settings.overtimeCutoff}.`}
           onClose={() => setShowPhotoModal(false)}
           onImportData={handlePhotoImport}
         />
@@ -354,9 +356,9 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
             className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-right"
           >
             <option value="ALL">جميع الورديات</option>
-            <option value="NORMAL_DAY">يوم عمل عادي (08:00 - 16:00)</option>
-            <option value="DAY_SHIFT">وردية نهارية (08:00 - 20:00)</option>
-            <option value="NIGHT_SHIFT">وردية ليلية (20:00 - 08:00)</option>
+            <option value="NORMAL_DAY">يوم عمل عادي ({settings.normalStart} - {settings.normalEnd})</option>
+            <option value="DAY_SHIFT">وردية نهارية ({settings.dayStart} - {settings.dayEnd})</option>
+            <option value="NIGHT_SHIFT">وردية ليلية ({settings.nightStart} - {settings.nightEnd})</option>
           </select>
         </div>
       </div>
@@ -374,8 +376,8 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                 <th className="py-3 px-3 font-mono">حضور</th>
                 <th className="py-3 px-3 font-mono">انصراف</th>
                 <th className="py-3 px-3 font-mono">ساعات العمل</th>
-                <th className="py-3 px-3 font-mono bg-amber-50/50">إضافي نهاري (1.35)</th>
-                <th className="py-3 px-3 font-mono bg-indigo-50/50">إضافي ليلي (1.70)</th>
+                <th className="py-3 px-3 font-mono bg-amber-50/50">إضافي نهاري ({settings.overtimeDayMultiplier})</th>
+                <th className="py-3 px-3 font-mono bg-indigo-50/50">إضافي ليلي ({settings.overtimeNightMultiplier})</th>
                 <th className="py-3 px-3 font-mono">قيمة الإضافي</th>
                 <th className="py-3 px-3">المصدر</th>
                 <th className="py-3 px-3">الحالة</th>
@@ -485,7 +487,7 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
           >
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200">
               <h3 id="attendance-modal-title" className="text-sm font-bold text-slate-900">
-                تسجيل حركة حضور وانصراف (تطبيق خوارزمية 6:00 م)
+                تسجيل حركة حضور وانصراف (تطبيق خوارزمية الحد الفاصل {settings.overtimeCutoff})
               </h3>
               <button
                 onClick={() => { setShowAddModal(false); setFormError(null); }}
@@ -536,9 +538,9 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     onChange={(e) => setShiftType(e.target.value as ShiftType)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs"
                   >
-                    <option value="NORMAL_DAY">يوم عادي (08:00 - 16:00)</option>
-                    <option value="DAY_SHIFT">وردية نهارية (08:00 - 20:00)</option>
-                    <option value="NIGHT_SHIFT">وردية ليلية (20:00 - 08:00)</option>
+                    <option value="NORMAL_DAY">يوم عادي ({settings.normalStart} - {settings.normalEnd})</option>
+                    <option value="DAY_SHIFT">وردية نهارية ({settings.dayStart} - {settings.dayEnd})</option>
+                    <option value="NIGHT_SHIFT">وردية ليلية ({settings.nightStart} - {settings.nightEnd})</option>
                   </select>
                 </div>
               </div>

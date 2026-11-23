@@ -16,7 +16,7 @@
 | ONLYOFFICE Phase 3 — الموجة C (لقطة PDF) | ✅ `b370979` | `docs/ONLYOFFICE-PHASE3-REPORT.md` |
 | ONLYOFFICE Phase 4 (واجهة المحرر + الإعدادات + الترخيص) | ✅ `8bd594d` | `docs/ONLYOFFICE-PHASE4-REPORT.md` |
 | الترخيص موقّع + CLI + `/api/license/status` | ✅ تقنيًا | `apps/api/app/services/license.py`، `apps/api/app/cli/license.py` |
-| التحقق الآلي الأخير | ✅ | `pytest 209` · `npm test 87` · `npm run lint` · `npm run build` |
+| التحقق الآلي الأخير | ✅ | `pytest 216` · `npm test 94` · `npm run lint` · `npm run build` |
 
 ---
 
@@ -35,32 +35,31 @@
 
 ---
 
-## المرحلة B — ربط إعدادات العمل بمحرك حساب الإضافي ⬜
+## المرحلة B — ربط إعدادات العمل بمحرك حساب الإضافي ✅
 
 **الهدف:** أن تصبح القيم المحفوظة في `work_settings` هي المصدر الفعلي للحساب، بدل الثوابت المكررة، دون تغيير القيم المعتمدة.
 
 ### المهام
 
-- [ ] إنشاء/توحيد دالة حساب على الخادم (مثلاً `apps/api/app/services/overtime.py`) تقرأ من `get_work_settings(db)`:
+- [x] إنشاء/توحيد دالة حساب على الخادم (`apps/api/app/services/overtime.py`) تقرأ من `get_work_settings(db)`:
   - `overtime_day_start`, `overtime_cutoff`
   - `overtime_day_multiplier`, `overtime_night_multiplier`
   - `late_grace_minutes` وورديات `normal/day/night`
-- [ ] جعل `src/utils/overtimeCalculator.ts` يستهلك نفس القيم عبر `/api/settings/work` (أو عبر واجهة حساب/معاينة على الخادم) وإزالة الثوابت `06:00` / `18:00` / `1.35` / `1.70` من منطق الحساب مع الإبقاء على دوال العرض/public API إن كانت مستخدمة في الاختبارات.
-- [ ] ربط `apps/api/app/services/attendance_processor.py` بفاصل الإضافي والمعاملين، وتحديد سلوك واضح للسجلات القديمة:
-  - إمّا إعادة حساب عند تغيير الإعدادات مع `audit_logs`،
-  - أو توثيق أن التغيير يطبّق على المزامنات القادمة فقط (القرار يجب أن يكون صريحًا وموثقًا).
-- [ ] إضافة اختبارات:
+- [x] جعل `src/utils/overtimeCalculator.ts` يستهلك نفس القيم عبر `/api/settings/work` عبر `src/hooks/useWorkSettings.ts`، مع إزالة `06:00` / `18:00` / `1.35` / `1.70` من منطق الحساب والإبقاء على دوال العرض/public API المستخدمة في الاختبارات.
+- [x] ربط `apps/api/app/services/attendance_processor.py` بفاصل الإضافي والمعاملين، مع **قرار موثق**: التغيير يطبّق على المزامنات والحسابات القادمة فقط، ولا تُعاد كتابة سجلات الحضور القديمة تلقائيًا.
+- [x] إضافة اختبارات:
   - حالات HR الذهبية: 16:00→20:00 = 2س بـ1.35 + 2س بـ1.70، و00:00→02:00 = 2س بـ1.70.
   - تغيير القيم في `work_settings` ينعكس في النتيجة.
   - لا `NaN`، لا خصم مزدوج، لا كسر لحالة `SETTINGS_VERSION_CONFLICT`.
-- [ ] لا تُغيَّر القيم الفعلية المعتمدة دون موافقة HR كتابية.
+- [x] لا تُغيَّر القيم الفعلية المعتمدة دون موافقة HR كتابية (القيم الافتراضية بقيت `18:00` و`1.35` و`1.70`).
+- [x] فتح `GET /api/settings/work` لكل الأدوار المصادق عليها (لأن الحاسبة تعمل لكل المستخدمين) مع إبقاء `PATCH` لـ `ADMIN`/`HR` فقط.
 
 ### الملفات المتوقعة
 
-`apps/api/app/services/settings.py` · `apps/api/app/services/attendance_processor.py` · خدمة حساب جديدة · `src/utils/overtimeCalculator.ts` · `src/utils/workSettings.ts` · اختبارات `pytest` و`vitest`.
+`apps/api/app/services/overtime.py` (جديد) · `apps/api/app/services/attendance_processor.py` · `apps/api/app/routers/settings.py` · `src/utils/overtimeCalculator.ts` · `src/hooks/useWorkSettings.ts` (جديد) · `src/components/WorkSettingsManager.tsx` · `src/components/OvertimeCalculatorWidget.tsx` · `src/components/AttendanceManager.tsx` · `src/App.tsx` · اختبارات `test_overtime_service.py` و`workSettingsEngine.spec.ts`.
 
 **معايير القبول:** تعديل «فاصل الإضافي» من الشاشة يغيّر نتيجة الحاسبة والحضور الجديد معًا؛ الاختبارات القديمة المبنية على القيم المعتمدة تمر دون تعديل.  
-**الحالة:** ⬜ لم تبدأ.
+**الحالة:** ✅ مكتملة — `pytest 216 passed` · `npm test 94 passed` · `npm run lint` · `npm run build`.
 
 ---
 
@@ -132,3 +131,4 @@
 | التاريخ | المرحلة | الحالة | ملاحظة |
 |---|---|---|---|
 | 2026-11-23 | A | ✅ | مزامنة `README.md` و`PLAN.md` و`AGENTS.md` وتقارير ONLYOFFICE + إنشاء `tasks.md`. |
+| 2026-11-23 | B | ✅ | خدمة `overtime.py` + ربط `attendance_processor` والحاسبة بـ`work_settings`؛ فتح قراءة الإعدادات لكل الأدوار؛ `pytest 216` و`npm test 94`. |

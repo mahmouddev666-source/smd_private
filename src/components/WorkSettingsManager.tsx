@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, RefreshCw, Save } from 'lucide-react';
 import { UserSession, WorkSettings } from '../types';
 import * as api from '../services/apiClient';
+import { applyWorkSettings } from '../hooks/useWorkSettings';
 import { canEdit } from '../utils/roles';
 import {
   WorkSettingsForm,
@@ -108,6 +109,8 @@ export const WorkSettingsManager: React.FC<WorkSettingsManagerProps> = ({ user }
     setError(null);
     try {
       const data = await api.fetchWorkSettings();
+      // Keep the live calculator in sync with the values the server returns.
+      applyWorkSettings(data);
       setSettings(data);
       setForm(formFromWorkSettings(data));
       setErrors({});
@@ -147,6 +150,9 @@ export const WorkSettingsManager: React.FC<WorkSettingsManagerProps> = ({ user }
       const updated = await api.patchWorkSettings(
         toWorkSettingsPatch(form, settings.version),
       );
+      // Apply immediately so every calculation made after saving uses the
+      // approved values without requiring a full page reload.
+      applyWorkSettings(updated);
       setSettings(updated);
       setForm(formFromWorkSettings(updated));
       setNotice('تم حفظ إعدادات الورديات والإضافي بنجاح.');
