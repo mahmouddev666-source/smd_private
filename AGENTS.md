@@ -1,6 +1,7 @@
 # AGENTS.md — قواعد العمل داخل مستودع SMD-HR
 
 هذا الملف موجّه لأي مطور أو وكيل ذكاء اصطناعي يعمل على هذا المستودع. اقرأه كاملًا قبل أي تعديل.
+الحالة التنفيذية الحالية في `docs/PLAN.md`، والمراحل المتبقية في `tasks.md`.
 
 ---
 
@@ -22,12 +23,15 @@
 ## 2) خريطة النظام
 
 ```
-apps/web            واجهة React/TypeScript
-apps/api            FastAPI: routers, models, schemas, services, migrations
-services/connector  مزامنة ZKTeco عبر pyzk
-infra               docker-compose, nginx, scripts
-docs                الأدلة
-src                 الواجهة الحالية (مؤقتًا حتى اكتمال النقل)
+src                 الواجهة الحالية والمصدر الفعلي لبناء صورة web (React/TS/Vite)
+apps/api            FastAPI: routers, models, schemas, services, migrations, CLI
+infra               docker-compose, nginx, scripts, صورة ONLYOFFICE
+docs                الأدلة والتقارير وخطة التنفيذ
+tests               Vitest + Playwright
+tasks.md            سجل المراحل المتبقية (يُحدَّث بعد كل مرحلة)
+
+apps/web            مسار قديم/غير مستخدم حاليًا — لا تُضف إليه ملفات جديدة
+services/connector  مسار قديم/غير مستخدم؛ موصل ZKTeco الفعلي داخل apps/api/app/services/zkteco.py
 ```
 
 ### طبقات الباك إند
@@ -117,7 +121,13 @@ docker compose exec api python -m app.seed --profile demo
 | رصيد عارضة | 7 |
 | رصيد مرضي | 90 كل 3 سنوات |
 
-> أي تغيير في هذه القيم يتطلب تعديل `settings` + اختبارات + موافقة HR.
+> أي تغيير في هذه القيم يتطلب تعديل `work_settings` + اختبارات + موافقة HR.
+>
+> **ملاحظة مزامنة (2026-11-23):** القيم المعتمدة أعلاه هي المرجع. نُقلت إلى جدول
+> `work_settings` (T3-19) وأصبحت قابلة للتحرير من `WorkSettingsManager.tsx`، لكن ربطها
+> الفعلي بمحرك الحساب لم يكتمل بعد: `src/utils/overtimeCalculator.ts` لا يزال يقرأ
+> الثوابت، و`attendance_processor.py` يقرأ الورديات و`late_grace_minutes` فقط.
+> لا تُغيّر القيم قبل تنفيذ المرحلة B من `tasks.md`، ولا تُحذف الثوابت قبل ربط المصدر.
 
 ---
 
@@ -130,6 +140,11 @@ docker compose exec api python -m app.seed --profile demo
 5. الطباعة A4 بدون هوامش إضافية، وبإخفاء كل عناصر الواجهة.
 6. لا تُنفّذ HTML مستوردًا بدون تنظيف.
 7. حد حجم الملف 20MB، وتحقق من نوعه عبر magic bytes لا الامتداد فقط.
+
+> **ONLYOFFICE Phase 3/4 مكتمل لكن معطّل افتراضيًا:** `ONLYOFFICE_ENABLED=false` و
+> `VITE_ONLYOFFICE_ENABLED=false`. لا تحذف أو تستبدل `Overlay` أو `FormDesigner` أو
+> `SmartForms` أو `formFileParser`؛ هي مسار المعاينة الافتراضي والـ fallback.
+> الترخيص ملف `license.json` موقّع على الخادم فقط، ولا كود قفل في الواجهة.
 
 ---
 
@@ -172,10 +187,12 @@ docker compose exec api python -m app.seed --profile demo
 
 ## 10) Git وسير العمل
 
-- الفروع: `main` (مستقر) ← `develop` ← `feature/<name>`.
-- رسائل commit بصيغة: `feat(attendance): prevent duplicate daily punches`.
-- لا commit مباشر على `main`.
-- لا ترفع: `.env`, `node_modules`, `dist`, `*.db`, `uploads/`, `backups/`.
+- الفرع `main` هو الفرع الحي والمستقر حاليًا، وقد تم الدمج والدفع عليه مباشرة بطلب
+  صريح من مالك المشروع (commits: `7a25689`, `b370979`, `8bd594d`). لا commit مباشر
+  على `main` إلا بطلب صريح موثّق من المالك. فروع `develop`/`feature/<name>` متاحة
+  عند العمل الجماعي أو عند طلب المالك، وليست إلزامية في هذا الطور.
+- رسائل commit بصيغة: `feat(office): phase 4 frontend integration with safe legacy fallback`.
+- لا ترفع: `.env`, `license.json`, `node_modules`, `dist`, `*.db`, `uploads/`, `backups/`.
 
 ---
 

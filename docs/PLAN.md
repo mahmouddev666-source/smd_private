@@ -1,8 +1,9 @@
 # SMD-HR — خطة التنفيذ والوصول للإنتاج
 
-> **آخر تحديث:** 2026-11-17
-> **الحالة:** المرحلة 0 ✅ — المرحلة 1 ✅ — المرحلة 2 ✅ — المرحلة 3 ✅ — المرحلة 4 ✅ — المرحلة 5 ✅ — المرحلة 6 ✅ — المرحلة 7 ✅ — المرحلة 8 (ما بعد التسليم) ⬜
+> **آخر تحديث:** 2026-11-23
+> **الحالة:** المرحلة 0 ✅ — المرحلة 1 ✅ — المرحلة 2 ✅ — المرحلة 3 ✅ — المرحلة 4 ✅ — المرحلة 5 ✅ — المرحلة 6 ✅ — المرحلة 7 ✅ — ONLYOFFICE Phase 3 (A/B/C) ✅ + Phase 4 ✅ — المرحلة 8 (ما بعد التسليم) ⬜
 > **مالك المشروع:** شركة السويس لمشتقات الميثانول (SMD) — الإدارة العامة للموارد البشرية
+> **المرجع المتحرك للمراحل المتبقية:** [`tasks.md`](../tasks.md) — يُحدَّث بعد إنهاء كل مرحلة.
 
 ---
 
@@ -91,10 +92,15 @@
 | 5. ZKTeco | ✅ مكتملة | 1 يوم | Backend + Hardware |
 | 6. قواعد العمل والتقارير | ✅ مكتملة | 1 يوم | Full-stack + HR |
 | 7. QA/UAT + نشر Windows | ✅ مكتملة (تنفيذًا) | 1 يوم | الكل |
+| ONLYOFFICE Phase 3 — A/B | ✅ مكتملة (`7a25689`) | — | Backend |
+| ONLYOFFICE Phase 3 — C | ✅ مكتملة (`b370979`) | — | Backend |
+| ONLYOFFICE Phase 4 | ✅ مكتملة (`8bd594d`) | — | Frontend |
 | 8. ما بعد التسليم | ⬜ لاحقًا | — | — |
 
-> **الوضع الآن:** المراحل 0–7 مكتملة تنفيذيًا: الباك إند، الواجهة، محرك المستندات، ZKTeco، دورة اعتماد الإجازات، الأذونات والمأموريات، التقارير، وDocker (db + api + web + worker).
-> **ملاحظة بيئية:** لم يتوفر Docker Desktop/WSL2 ولا أجهزة ZKTeco حقيقية على جهاز التطوير، لذا يجب تنفيذ التحقق النهائي (`docker compose up -d --build` + اختبار استعادة نسخة + بصمة حقيقية) على جهاز الشركة عند التسليم. هذا بند تشغيلي في المرحلة 8 وليس عملًا برمجيًا متبقيًا.
+> **الوضع الآن:** المراحل 0–7 مكتملة تنفيذيًا، ومعها ONLYOFFICE Phase 3 (الإصدارات، الجلسات، التوقيع، لقطة PDF) وPhase 4 (المحرر، إعدادات الورديات، بطاقة الترخيص). الميزة محجوبة خلف `ONLYOFFICE_ENABLED=false` و`VITE_ONLYOFFICE_ENABLED=false`، والمعاينة القديمة هي المسار الافتراضي والـ fallback.
+> **الالتزامات:** `7a25689` (A+B)، `b370979` (C)، `8bd594d` (Phase 4) — وكلها مدفوعة إلى `origin/main`.
+> **ملاحظة بيئية:** لم يتحقق Docker فعليًا على جهاز التطوير، وجارٍ التجربة على جهاز آخر به Docker. التحقق النهائي (`docker compose up -d --build` + استعادة نسخة + بصمة حقيقية + تثبيت ترخيص) بند تشغيلي في المرحلة 8 و`tasks.md`.
+> **متبقٍ برمجيًا مذكور في `tasks.md`:** ربط إعدادات العمل بمحرك الحساب، وتثبيت `license.json` داخل Docker مع تثبيت البصمة، ثم التحقق والتسليم.
 
 ---
 
@@ -112,10 +118,10 @@
 - [x] إنشاء `README.md` و`AGENTS.md` في جذر المشروع.
 - [x] `.env.example` جديد يشمل: `DATABASE_URL`, `SECRET_KEY`, `API_BASE_URL`, `TZ=Africa/Cairo`, `ZK_*`.
 - [x] `git init -b main` + أول commit + رفع للريبو `smd_private`.
-- [ ] إنشاء هيكل `apps/web`, `apps/api`, `services/connector`, `infra` — **مؤجل للمرحلة 2** (سيُنشأ مع Docker والـ API).
-- [ ] فك تداخل المجلد (`SMD-HR-main/SMD-HR-main`) — **مؤجل قبل التسليم** (لا يؤثر على التشغيل الحالي).
-- [ ] تثبيت Python 3.12 + Docker + WSL2 — **مؤجل للمرحلة 2**.
-- [ ] فرع `develop` — **اختُصر مؤقتًا** على `main` لتسريع الأسبوع الأول.
+- [x] إنشاء هيكل `apps/api` و`infra` فعليًا. الواجهة ما زالت في `src/`؛ `apps/web` و`services/connector` غير مستخدمين حاليًا ولا يمثلان مسار البناء.
+- [ ] فك تداخل المجلد (`SMD-HR-main/SMD-HR-main`) — **مؤجل** (لا يؤثر على التشغيل طالما يُنفَّذ من الجذر الداخلي).
+- [x] تثبيت Python 3.12 محليًا. Docker/WSL2 يُتحقق عليه الآن على جهاز الاختبار الآخر.
+- [x] سير العمل مختصر على `main` بطلب صريح من مالك المشروع؛ فروع `develop`/`feature` اختيارية وليست إلزامية حاليًا (انظر `AGENTS.md` §10).
 
 **المخرجات:** مستودع نظيف + بناء ناجح + تقرير Playwright أولي + README/AGENTS + رفع للريبو. ✅
 **معيار القبول:** `npm run build` و`npx playwright test` يمرّان، والتطبيق يفتح على localhost. ✅
@@ -155,7 +161,7 @@
 
 ---
 
-### المرحلة 2 — الباك إند + PostgreSQL + المصادقة + Docker 🟡
+### المرحلة 2 — الباك إند + PostgreSQL + المصادقة + Docker ✅ (تنفيذًا)
 
 **الهدف:** مصدر بيانات مركزي حقيقي على الجهاز.
 
@@ -167,9 +173,9 @@
   - [x] `leave_balances`, `leaves`.
   - [x] `permits`, `missions`.
   - [x] `zkteco_devices`.
-  - [ ] `departments`, `employee_documents` — المرحلة 4.
-  - [ ] `shifts`, `holidays`, `settings` — المرحلة 6.
-  - [x] `form_templates`, `form_submissions`, `form_files` — المرحلة 4. (حقول القالب داخل `form_templates.fields` كـ JSONB بدل جدول منفصل)
+  - [x] `form_templates`, `form_submissions`, `form_files` — المرحلة 4 (حقول القالب داخل `form_templates.fields` كـ JSONB).
+  - [x] `document_versions` / `office_sessions` — ONLYOFFICE Phase 3 (الترحيل `f3c1a9d2b7e4`).
+  - [x] `work_settings` — T3-19 (الترحيل `b7e9c2d4f6a8`)؛ `holidays` تُدار كأنواع إجازات.
 - [x] Alembic + ترحيل أولي `552fc48f8e7e_initial_schema.py` + قيود UNIQUE + فهارس + `alembic upgrade head` مُختبر.
 - [x] مصادقة: argon2 (`pwdlib`) + JWT Access + `get_current_user` + `require_role`. (Refresh/HttpOnly Cookie مؤجلة — الواجهة تستخدم Bearer حاليًا.)
 - [x] أدوار: `ADMIN`, `HR`, `SUPERVISOR`, `VIEWER` + `EDITOR_ROLES` على كل كتابة.
@@ -179,8 +185,8 @@
 - [x] `seed.py` تجريبي: 3 مستخدمين + 18 موظفًا `9001`–`9018` + أرصدة + 30 يوم حضور + جهازان، مع `--reset-demo` و`--create-tables`.
 - [x] حاويات: `apps/api/Dockerfile` (مع LibreOffice)، `apps/api/docker-entrypoint.sh` (انتظار DB → `alembic upgrade head` → uvicorn)، `infra/web/Dockerfile` + `infra/nginx/default.conf` (SPA + proxy `/api`) + `.dockerignore`.
 - [x] تشغيل يدوي مُتحقق منه: `uvicorn` على `127.0.0.1:8100` → `/api/health` + تسجيل دخول `admin` + `/api/employees` = 18.
-- [ ] تشغيل `docker compose up` فعليًا — **متعذر على جهاز التطوير الحالي** (لا Docker Desktop/WSL2 مثبتين، ومثبّت Python عبر winget فشل بـ 1603). ملفات Compose جاهزة وتحتاج جهازًا به Docker للتحقق.
-- [ ] سكربت ترحيل localStorage → DB — سيُنفَّذ مع المرحلة 3 (بعد وجود عميل API).
+- [ ] تشغيل `docker compose up` فعليًا — **جارٍ على جهاز اختبار آخر به Docker**؛ لم يتحقق بعد على جهاز التطوير. ملفات Compose جاهزة.
+- [x] سكربت ترحيل `localStorage` → DB — **أُلغي**: وضع العرض المحلي للعرض فقط ومعطّل في الإنتاج (`VITE_ALLOW_OFFLINE_DEMO=false`).
 
 **معيار القبول:** `docker compose up` يعمل من الصفر، والبيانات تظهر من عدة أجهزة على الشبكة. ⏳ (بانتظار التحقق على جهاز به Docker)
 
@@ -194,7 +200,7 @@ docker compose exec api python -m app.seed --profile demo
 
 ---
 
-### المرحلة 3 — ربط الواجهة بالـ API 🟡
+### المرحلة 3 — ربط الواجهة بالـ API ✅ (تنفيذًا)
 
 **الهدف:** إزالة `localStorage` كطبقة بيانات.
 
@@ -257,9 +263,9 @@ docker compose exec api python -m app.seed --profile demo
   - [x] طباعة A4 عبر Portal خارج `#root`، بعرض 794px، وانتظار اكتمال رسم كل الصفحات قبل `window.print()`، ثم تنظيف الأنماط بعد `afterprint`.
   - [x] إخفاء الحفظ عن `VIEWER` مع إبقاء الطباعة متاحة.
   - [x] وضع تجربة بدون خادم: `DemoFormStore` على IndexedDB (PDF/صور فقط) + بانر دائم + زر مسح بيانات التجربة.
-- [ ] قوالب جاهزة: طلب إجازة، أمر مأمورية، إذن خروج.
-- [ ] تصدير PDF من الخادم (بدل الاعتماد على طباعة المتصفح فقط).
-- [ ] إزالة حفظ base64 من `localStorage` نهائيًا (تبقى `SmartForms` في وضع demo فقط حتى ينتهي وضع التعبئة).
+- [ ] قوالب جاهزة: طلب إجازة، أمر مأمورية، إذن خروج (تُجهَّز من ملفات SMD الأصلية في UAT).
+- [x] تصدير PDF من الخادم للطلبات: مولّد اللقطة `apps/api/app/services/render.py` (ONLYOFFICE Phase 3 Wave C) مع خط Cairo ودعم RTL. طباعة المتصفح تبقى متاحة كمسار افتراضي.
+- [ ] إزالة/تقاعد `SmartForms` و`formFileParser` و`Overlay` و`FormDesigner` — **مؤجل صراحةً**؛ لا تُحذف هذه الملفات في الوقت الحالي، وهي تعمل كـ fallback عند إيقاف ONLYOFFICE.
 
 #### 4.3 الأمان والجودة
 - [x] عدم عرض ملفات المستخدمين بدون مصادقة (التنزيل عبر `GET /forms/files/{id}/download` ويتطلب جلسة).
@@ -272,6 +278,41 @@ docker compose exec api python -m app.seed --profile demo
 > **التجربة بدون خادم:** عند عدم تشغيل API يمكن تجربة الرفع/التصميم/التعبئة/الطباعة عبر مخزن IndexedDB مؤقت (`services/formStore.ts`) ببانر دائم، في بناءات التطوير فقط. الخطوات الكاملة لتشغيل الـ API محليًا بـ Python + SQLite (بدون Docker) في `docs/RUN-WITHOUT-DOCKER.md`.
 
 > **تحديث التنقل (UI فقط):** تحوّل الشريط العلوي إلى Sidebar يمينية ثابتة بعرض 260px تحترم RTL (`components/Navbar.tsx` → `Sidebar`)، وفي الموبايل تتحول إلى Drawer عبر زر Hamburger. بيانات المستخدم ودور الخروج وأزرار النسخ الاحتياطي/الترخيص أصبحت أسفل الشريط. لا تغيير في الباك إند أو نماذج البيانات. أُضيف اختبارا E2E: ظهور الشريط على Desktop، وفتح/إغلاق Drawer على Mobile.
+
+---
+
+### ONLYOFFICE Phase 3 + Phase 4 (مشروع فرعي داخل المرحلة 4) ✅
+
+> هذا المشروع الفرعي لا يُغيّر ترقيم المراحل 0–8. تم تنفيذه بعد المرحلة 7 قبل التسليم،
+> وهو خلف مفتاحين معطّلين افتراضيًا لضمان بقاء السلوك القديم كما هو.
+
+| الموجة | المسؤوليات | Git |
+|---|---|---|
+| Phase 3 — A | نماذج الإصدارات/الجلسات، ترحيل + backfill، إعدادات fail-fast، **T3-18 الترخيص**، **T3-19 إعدادات الورديات**، أدوار التحرير | مُضمّنة في `7a25689` |
+| Phase 3 — B | خدمة إصدارات ذرّية، تحويل OOXML + PDF، طبقتا JWT، كل نقاط `/api/office/*`، حماية SSRF، `no-store` | `7a25689` |
+| Phase 3 — C | مولّد لقطة PDF عربي (Cairo)، تثبيت إصدار المستند في الطلب، إعادة محاولة في `worker` حتى 3 مرات | `b370979` |
+| Phase 4 | غلاف `OfficeEditor`، زر التحرير، شاشة «إعدادات الورديات»، بطاقة الترخيص، حجب تبويب المعمارية عن غير `ADMIN` | `8bd594d` |
+
+**التحقق المسجّل:** `pytest` → 209/209 · `npm run lint` + `npm run build` ناجحان · `npm test` → 87/87 في 11 ملفًا · Alembic `upgrade → downgrade → upgrade` → `b7e9c2d4f6a8`.
+
+**الوضع الافتراضي:**
+
+```env
+ONLYOFFICE_ENABLED=false
+VITE_ONLYOFFICE_ENABLED=false
+SUBMISSION_SNAPSHOT_ENABLED=true
+ZK_SYNC_ENABLED=true (worker فقط)
+```
+
+**النقاط المضافة:** `/api/office/status`، `/api/office/config/{file_id}`،
+`/api/office/files/{file_id}/versions`، `POST /api/office/files/{file_id}/sessions/close`،
+`GET /api/forms/submissions/{id}`، `GET /api/forms/submissions/{id}/document`،
+`GET/PATCH /api/settings/work`، و`GET /api/license/status`.
+
+> صلاحيات التحرير على الخادم `ADMIN`/`HR` فقط. الترخيص ملف موقّع بلا جدول DB،
+> و`LICENSE_ENFORCE=false` افتراضيًا. خطوات التفعيل مفصّلة في `README.md` قسم «الترخيص والحقوق».
+> الملفات القديمة `Overlay` و`FormDesigner` و`SmartForms` و`formFileParser` **لم تُحذف** وهي الـ fallback.
+> التقارير: `docs/ONLYOFFICE-PHASE3-REPORT.md` و`docs/ONLYOFFICE-PHASE4-REPORT.md`.
 
 ---
 
@@ -348,7 +389,7 @@ docker compose exec api python -m app.seed --profile demo
   - الخصم يحدث مرة واحدة فقط عند الاعتماد؛ الرفض لا يخصم، وإعادة القرار تُرجع `LEAVE_ALREADY_DECIDED`.
 - [x] الأذونات: حد الساعتين للشخصي، و4 ساعات لإذن العمل، وتحقق التوقيت والمدة، ومنع التداخل في نفس اليوم، وحد يومي إجمالي (4 ساعات) — كلها في `app/services/permits.py` وقابلة للضبط من `.env`.
 - [x] المأموريات: تحقق تاريخ البدء/العودة وعدد الأيام (≤ 60 يومًا) والحد الأقصى للبدل اليومي (2000 ج.م)، وحساب `total_allowance` على الخادم فقط. `مأمورية بدون بدل` = صفر.
-- [x] إعدادات الإضافي (الفاصل 18:00، النِسَب 1.35/1.70) معتمدة ومركزية في `src/utils/overtimeCalculator.ts` وموثقة في `AGENTS.md`؛ أي تغيير يتطلب موافقة HR (بند إداري في Phase 8 عند الحاجة).
+- [x] إعدادات الإضافي (الفاصل 18:00، النِسَب 1.35/1.70) معتمدة وموثقة في `AGENTS.md`. القيم انتقلت أيضًا إلى جدول `work_settings` (T3-19) ويمكن تعديلها من شاشة «إعدادات الورديات»، لكن **ربطها الفعلي بمحرك الحساب لم يكتمل بعد**: `src/utils/overtimeCalculator.ts` ما زال يستخدم الثوابت، و`attendance_processor.py` يقرأ الورديات وسماحية التأخير فقط. مدرج في `tasks.md` (المرحلة B). أي تغيير قيم يتطلب موافقة HR.
 - [x] العطلات الرسمية والورديات: الورديات الثلاث (عادي/نهاري/ليلي) مطبقة في حساب الحضور والإضافي، والعطلات تُدار كأنواع إجازات.
 - [x] تقارير بفترة/إدارة/حالة + إجماليات صحيحة (`src/utils/reports.ts`): الحضور، الإجازات، الوقت الإضافي، والتحليل القطاعي.
 - [x] تصدير Excel RTL + طباعة/PDF A4 عربية بدون شريط التنقل (`ReportsCenter.tsx` + `printReport`).
@@ -356,7 +397,7 @@ docker compose exec api python -m app.seed --profile demo
 
 **معيار القبول:** مطابقة 100% لحالات UAT الموقعة من HR — الاختبارات الآلية تغطي القواعد الأساسية (`pytest` + Vitest + Playwright).
 
-> **الاختبارات المضافة:** 86 حالة `pytest` (دورة الاعتماد، الصلاحيات، التداخل، حد الأذونات اليومي، بدلات المأموريات، الترخيص، النسخ الاحتياطي)، 73 حالة Vitest (منها 6 لتجميعات التقارير)، و21 حالة Playwright (منها اختباران لدورة الاعتماد والرفض مع السبب).
+> **الاختبارات المضافة:** 86 حالة `pytest` في هذه المرحلة، ثم ارتفع الإجمالي إلى **209** بعد Phase 3/4 (دورة الاعتماد، الصلاحيات، التداخل، حد الأذونات، بدلات المأموريات، الترخيص، النسخ الاحتياطي، الإصدارات، اللقطة، ONLYOFFICE). و**87** حالة Vitest في 11 ملفًا بعد Phase 4، و21 حالة Playwright (منها اختباران لدورة الاعتماد والرفض مع السبب).
 >
 > **الترحيل:** `alembic/versions/e5b2d3f9a6c1_leave_approval_workflow.py` (`leaves.decision_notes`).
 
@@ -365,7 +406,7 @@ docker compose exec api python -m app.seed --profile demo
 ### المرحلة 7 — QA / UAT / النشر على Windows ✅
 
 - [x] Playwright: دخول، موظفون، حضور، إجازة، مستند، تقارير (21 اختبارًا).
-- [x] pytest: الحسابات، الصلاحيات، منع التكرار، الاستيراد (86 اختبارًا).
+- [x] pytest: الحسابات، الصلاحيات، منع التكرار، الاستيراد (86 اختبارًا حينها؛ الإجمالي الحالي 209 بعد Phase 3/4).
 - [x] مراجعة أمان: كلمات مرور argon2، جلسات JWT، رفع ملفات محمي، أسرار من `.env`، وإزالة أي CORS افتراضي مضمّن (`CORS_ORIGINS` صار فارغًا افتراضيًا مع الاعتماد على same-origin عبر nginx).
 - [x] نشر على جهاز الشركة (Docker Compose الإنتاجي):
   - [x] `db` + `api` + `web` + `worker` مع `restart: unless-stopped` وhealthchecks.
@@ -379,7 +420,7 @@ docker compose exec api python -m app.seed --profile demo
 - [x] UPS للجهاز (توصية موثقة في README).
 - [x] أدلة النشر والتشغيل والنسخ والاستعادة في `README.md` و`docs/`.
 - [x] تدريب/تسليم: حزمة التشغيل جاهزة (`.env.example` + Compose + seed + اختبارات)؛ جلسة التسليم تُنفّذ على جهاز الشركة.
-- [x] ترخيص: `GET /api/license/status` (قراءة حالة فقط، لا يحجب شيئًا) مع `LICENSE_KEY`/`LICENSE_EXPIRES_ON`/`LICENSE_ENFORCE`.
+- [x] ترخيص: ملف `license.json` موقّع (T3-18) + CLI + `GET /api/license/status` + `LICENSE_ENFORCE` (يبقى `false` افتراضيًا). القيم القديمة `LICENSE_KEY`/`LICENSE_EXPIRES_ON` تعمل كـ fallback فقط. خطوات التفعيل في `README.md`، وتثبيت الملف داخل Docker مدرج في `tasks.md`.
 
 **معيار القبول:** UAT موقع + نسخة احتياطية مستعادة بنجاح + تشغيل مستقر — يُستكمل على جهاز الشركة كما هو موضح في ملاحظة البيئة أعلاه.
 
@@ -391,11 +432,17 @@ docker compose exec api python -m app.seed --profile demo
 
 ### المرحلة 8 — ما بعد التسليم
 
-- [ ] التحقق التشغيلي عند التسليم: `docker compose up -d --build` + استعادة نسخة احتياطية فعلية + قراءة بصمة من جهاز ZKTeco حقيقي.
-- [ ] استيراد بيانات الموظفين الحقيقية من Excel.
-- [ ] استيراد كشوف الحضور الأسبوعية.
+> التفاصيل والتحديث التدريجي في [`tasks.md`](../tasks.md). ما يلي هو ملخص الخطة الأصلية بعد مزامنتها مع الوضع الحالي.
+
+- [x] ترخيص سيرفر-سايد موقّع **تنفيذيًا** (T3-18: ملف + توقيع + CLI + endpoint). يتبقى تثبيته على جهاز الشركة وتأمين mount ملف الترخيص وتثبيت البصمة داخل Docker (المرحلة C في `tasks.md`).
+- [ ] ربط إعدادات `work_settings` بمحرك حساب الإضافي وإزالة الثوابت المكررة (المرحلة B في `tasks.md`).
+- [ ] التحقق التشغيلي عند التسليم: `docker compose up -d --build` + استعادة نسخة احتياطية فعلية + قراءة بصمة من جهاز ZKTeco حقيقي (المرحلة D في `tasks.md`).
+- [ ] تثبيت `license.json` داخل `api`/`worker` عبر volume ثابت وتثبيت `LICENSE_HARDWARE_ID` بعد التحقق (المرحلة C في `tasks.md`).
+- [ ] استيراد بيانات الموظفين الحقيقية من Excel (المرحلة E).
+- [ ] استيراد كشوف الحضور الأسبوعية (المرحلة E).
 - [ ] ترحيل الجهاز إلى سيرفر داخلي (نسخ Compose + استعادة DB + تغيير `.env`).
-- [ ] ترخيص سيرفر-سايد موقّع (إن كان مطلوبًا تجاريًا).
+- [ ] توقيع UAT النهائي من HR بعد استكمال ما سبق.
+- [ ] إقفال شهري (أجّلته HR؛ اختياري).
 - [ ] إشعارات (بريد/واتساب) — اختياري.
 - [ ] بوابة الخدمة الذاتية للموظف — اختياري.
 
@@ -438,7 +485,7 @@ docker compose exec api python -m app.seed --profile demo
 | الخطر | الأثر | التخفيف |
 |---|---|---|
 | أجهزة ZKTeco غير متاحة أو طرازها غير مدعوم | تأخير المرحلة 5 | جرد فوري + موصل جاهز + استيراد بديل |
-| 1 أسبوع غير كافٍ لمحرك المستندات + كل شيء | جودة منخفضة | أولوية للمستندات والبيانات المشتركة، وتأجيل OCR/الترخيص |
+| 1 أسبوع غير كافٍ لمحرك المستندات + كل شيء | جودة منخفضة | أولوية للمستندات والبيانات المشتركة؛ أُجّل OCR، ونُفّذ الترخيص تقنيًا في Phase 3 ويتبقى تثبيته التشغيلي |
 | جهاز واحد = نقطة فشل | فقدان كل البيانات | UPS + نسخ ليلي خارجي + اختبار استعادة |
 | Docker Desktop على Windows | ترخيص/تعقيد | Docker Engine داخل WSL2 أو Linux VM |
 | قاعدة الإضافي غير معتمدة | إعادة حساب | اعتماد HR كتابيًا قبل المرحلة 6 |
