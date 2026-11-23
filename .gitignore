@@ -28,3 +28,8 @@ storage/
 backups/
 *.db
 *.sqlite
+
+# Licence material (Phase C): never commit the signed file or its HMAC key.
+# The key lives only in .env / LICENSE_SIGNING_KEY and must never be logged.
+license.json
+LICENSE_SIGNING_KEY

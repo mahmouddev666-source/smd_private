@@ -1,6 +1,7 @@
 """T3-18: licence file verification, CLI and API behaviour."""
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -11,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from app.main import app
 from app.services import license as service
 from tests.conftest import login
 
@@ -110,6 +112,85 @@ def test_startup_enforcement(license_env: Path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "license_enforce", True)
     with pytest.raises(RuntimeError, match="ترخيص SMD-HR غير صالح"):
         service.enforce_startup()
+
+
+@pytest.mark.parametrize("status", sorted(service.BLOCKING_STATUSES))
+def test_enforce_startup_blocks_every_blocking_status(status: str, monkeypatch) -> None:
+    fake = service.LicenseState(status=status, source="file", license_key_present=True)
+    monkeypatch.setattr(service, "check_license", lambda *args, **kwargs: fake)
+    monkeypatch.setattr(settings, "license_enforce", True)
+    with pytest.raises(RuntimeError, match="ترخيص SMD-HR غير صالح"):
+        service.enforce_startup()
+
+
+@pytest.mark.parametrize("status", ["unconfigured", "active", "expiring", "not_yet_valid"])
+def test_enforce_startup_never_blocks_non_blocking_statuses(status: str, monkeypatch) -> None:
+    fake = service.LicenseState(status=status, source="file", license_key_present=True)
+    monkeypatch.setattr(service, "check_license", lambda *args, **kwargs: fake)
+    monkeypatch.setattr(settings, "license_enforce", True)
+    assert service.enforce_startup().status == status
+
+
+def test_api_startup_fails_with_arabic_message_when_enforce_and_expired(
+    license_env: Path, monkeypatch
+) -> None:
+    """LICENSE_ENFORCE=true must stop the ASGI startup, not just log."""
+    service.build_file(
+        _payload(expires_at=date.today() - timedelta(days=1)), path=license_env
+    )
+    monkeypatch.setattr(settings, "license_enforce", True)
+    with pytest.raises(RuntimeError, match="ترخيص SMD-HR غير صالح: انتهت صلاحية الترخيص"):
+        with TestClient(app):
+            pass
+
+
+def test_api_startup_fails_with_arabic_message_when_enforce_and_invalid(
+    license_env: Path, monkeypatch
+) -> None:
+    license_env.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(settings, "license_enforce", True)
+    with pytest.raises(RuntimeError, match="ترخيص SMD-HR غير صالح: ملف الترخيص غير صالح"):
+        with TestClient(app):
+            pass
+
+
+def test_api_startup_warns_without_blocking_when_enforcement_disabled(
+    license_env: Path, monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    service.build_file(
+        _payload(expires_at=date.today() - timedelta(days=1)), path=license_env
+    )
+    monkeypatch.setattr(settings, "license_enforce", False)
+    with caplog.at_level(logging.WARNING, logger="smd_hr.license"):
+        with TestClient(app) as client:
+            assert client.get("/api/health").status_code == 200
+    warnings = [
+        record.message
+        for record in caplog.records
+        if record.name == "smd_hr.license" and record.levelno >= logging.WARNING
+    ]
+    assert any(
+        "تنبيه ترخيص SMD-HR" in message and "انتهت صلاحية الترخيص" in message
+        for message in warnings
+    )
+    assert KEY not in caplog.text
+
+
+def test_expiring_license_warns_but_does_not_block_even_when_enforced(
+    license_env: Path, monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    service.build_file(
+        _payload(expires_at=date.today() + timedelta(days=10)), path=license_env
+    )
+    monkeypatch.setattr(settings, "license_enforce", True)
+    with caplog.at_level(logging.WARNING, logger="smd_hr.license"):
+        state = service.enforce_startup()
+    assert state.status == "expiring"
+    assert any(
+        "تنبيه ترخيص SMD-HR" in record.message
+        for record in caplog.records
+        if record.name == "smd_hr.license" and record.levelno >= logging.WARNING
+    )
 
 
 def test_api_response_adds_fields_without_leaking_secrets(

@@ -326,8 +326,14 @@ def enforce_startup(config: Settings | None = None) -> LicenseState:
         state.days_remaining if state.days_remaining is not None else "-",
         cfg.license_enforce,
     )
-    if cfg.license_enforce and state.status in BLOCKING_STATUSES:
-        raise RuntimeError(f"ترخيص SMD-HR غير صالح: {state.message}")
+    if state.status in BLOCKING_STATUSES:
+        if cfg.license_enforce:
+            raise RuntimeError(f"ترخيص SMD-HR غير صالح: {state.message}")
+        # Phase C: the API still starts, but the operator gets a clear Arabic
+        # warning. The message is generic and never includes keys or files.
+        logger.warning("تنبيه ترخيص SMD-HR (الفرض معطّل): %s", state.message)
+    elif state.status in {"expiring", "not_yet_valid"}:
+        logger.warning("تنبيه ترخيص SMD-HR: %s", state.message)
     return state
 
 

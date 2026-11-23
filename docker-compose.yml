@@ -50,6 +50,10 @@ services:
       SEED_DEMO_ON_START: ${SEED_DEMO_ON_START:-false}
       DEMO_MODE: ${DEMO_MODE:-true}
       LIBREOFFICE_BIN: ${LIBREOFFICE_BIN:-/usr/bin/libreoffice}
+      # Phase C: the signed licence is bind-mounted read-only below. The
+      # container path is explicit so a host-side LICENSE_FILE cannot move it.
+      LICENSE_FILE: /app/license.json
+      LICENSE_ENFORCE: ${LICENSE_ENFORCE:-false}
       # ONLYOFFICE (Phase 3 uses these). Internal service names only: the editor
       # is never reached from the API through the public host.
       ONLYOFFICE_INTERNAL_URL: http://onlyoffice
@@ -60,6 +64,9 @@ services:
     volumes:
       - uploads:/data/uploads
       - backups:/backups
+      # Phase C: host file stays on the machine; recreate containers freely.
+      # Create ./license.json before the first `docker compose up` (see README).
+      - ./license.json:/app/license.json:ro
     depends_on:
       db:
         condition: service_healthy
@@ -137,6 +144,9 @@ services:
       TZ: ${TZ:-Africa/Cairo}
       STORAGE_DIR: /data/uploads
       BACKUP_DIR: /backups
+      # Same read-only licence mount/path as `api` (Phase C).
+      LICENSE_FILE: /app/license.json
+      LICENSE_ENFORCE: ${LICENSE_ENFORCE:-false}
       # Background maintenance: ZKTeco polling + daily pg_dump.
       ZK_SYNC_ENABLED: ${ZK_SYNC_ENABLED:-true}
       WORKER_TICK_SECONDS: ${WORKER_TICK_SECONDS:-60}
@@ -146,6 +156,7 @@ services:
     volumes:
       - uploads:/data/uploads
       - backups:/backups
+      - ./license.json:/app/license.json:ro
     depends_on:
       db:
         condition: service_healthy

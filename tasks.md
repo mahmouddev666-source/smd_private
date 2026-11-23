@@ -63,19 +63,19 @@
 
 ---
 
-## المرحلة C — تثبيت الترخيص داخل Docker ⬜
+## المرحلة C — تثبيت الترخيص داخل Docker ✅
 
 **الهدف:** أن يبقى `license.json` صالحًا بعد إعادة إنشاء الحاويات، وأن تثبت بصمة الجهاز.
 
-- [ ] إضافة volume/read-only mount لـ `license.json` في خدمتَي `api` و`worker` داخل `docker-compose.yml`.
-- [ ] ضبط `LICENSE_FILE` داخل الحاوية بشكل صريح وموثق، وتحديث `.env.example` بتعليمات `LICENSE_HARDWARE_ID`.
-- [ ] مراجعة خطوات `docker compose exec api python -m app.cli.license hardware-id` ثم `generate` ثم `verify` ثم `/api/license/status` بعد التثبيت الفعلي (التوثيق الأساسي تم في المرحلة A).
-- [ ] اختبار الحالات: `unconfigured`، `active`، `expiring`، `hardware_mismatch`، `invalid`، `expired`.
-- [ ] اختبار أن `LICENSE_ENFORCE=true` يمنع الإقلاع فقط في الحالات الثلاث المانعة، وأن الرسالة عربية وبدون أسرار.
-- [ ] التأكد أن `license.json` و`LICENSE_SIGNING_KEY` غير موجودين في Git ولا في سجلات API.
+- [x] إضافة volume/read-only mount لـ `license.json` في خدمتَي `api` و`worker` داخل `docker-compose.yml`.
+- [x] ضبط `LICENSE_FILE=/app/license.json` داخل الحاوية بشكل صريح وموثق، وتحديث `.env.example` بتعليمات `LICENSE_HARDWARE_ID`.
+- [x] مراجعة خطوات `docker compose exec api python -m app.cli.license hardware-id` ثم `generate` ثم `verify` ثم `/api/license/status` وتوثيقها في `README.md`.
+- [x] اختبار الحالات: `unconfigured`، `active`، `expiring`، `hardware_mismatch`، `invalid`، `expired`.
+- [x] اختبار أن `LICENSE_ENFORCE=true` يمنع الإقلاع فقط في الحالات الثلاث المانعة، وأن الرسالة عربية وبدون أسرار، مع تحذير عربي عند `false`.
+- [x] التأكد أن `license.json` و`LICENSE_SIGNING_KEY` غير موجودين في Git ولا في سجلات API.
 
 **معايير القبول:** بعد `docker compose down && docker compose up -d --build` تبقى الحالة `active` دون نسخ الملف يدويًا.  
-**الحالة:** ⬜ لم تبدأ.  
+**الحالة:** ✅ مكتملة — `pytest 227 passed`؛ التحقق التشغيلي على جهاز الشركة ضمن المرحلة D.  
 **ملاحظة:** هذه المرحلة لا تُفعّل الفرض في الإنتاج؛ `LICENSE_ENFORCE` يبقى `false` حتى يقرر المالك.
 
 ---
@@ -132,3 +132,4 @@
 |---|---|---|---|
 | 2026-11-23 | A | ✅ | مزامنة `README.md` و`PLAN.md` و`AGENTS.md` وتقارير ONLYOFFICE + إنشاء `tasks.md`. |
 | 2026-11-23 | B | ✅ | خدمة `overtime.py` + ربط `attendance_processor` والحاسبة بـ`work_settings`؛ فتح قراءة الإعدادات لكل الأدوار؛ `pytest 216` و`npm test 94`. |
+| 2026-11-23 | C | ✅ | mount للقراءة فقط لـ`license.json` في `api`/`worker`، تثبيت `LICENSE_FILE`، توثيق CLI، اختبارات فرض الإقلاع والتحذير العربي؛ `pytest 227`. |

@@ -24,7 +24,7 @@
 
 ## الوضع الحالي
 
-> ✅ المراحل 0–7 مكتملة، ومعها **ONLYOFFICE Phase 3 (Waves A/B/C) + Phase 4** و**المرحلة B** مكتملة ومُلتزمة في Git. النظام جاهز للتشغيل الإنتاجي عبر Docker؛ يتبقى التحقق التشغيلي والربط النهائي المذكور في `tasks.md`.
+> ✅ المراحل 0–7 مكتملة، ومعها **ONLYOFFICE Phase 3 (Waves A/B/C) + Phase 4** و**المرحلتان B وC** مكتملة ومُلتزمة في Git. النظام جاهز للتشغيل الإنتاجي عبر Docker؛ يتبقى التحقق التشغيلي والربط النهائي المذكور في `tasks.md`.
 
 - **الباك إند جاهز** في `apps/api`: FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16، مصادقة JWT (argon2)، أدوار، Audit Log، واختبارات `pytest` (**216/216** بعد موجات ONLYOFFICE الثلاث والمرحلة B).
 - **Docker جاهز**: `docker-compose.yml` يشغّل `db` + `api` + `web` (nginx) + `worker` (مزامنة ZKTeco + نسخ احتياطي مجدول) + `onlyoffice` (ONLYOFFICE Document Server، داخلي فقط)، بصور متعددتي المراحل وhealthchecks وvolumes دائمة.
@@ -266,14 +266,15 @@ docker compose exec api python -m app.seed --reset-demo
 | `ONLYOFFICE_JWT_SECRET` | سر مشترك مع Document Server (32+ حرفًا؛ إلزامي لـ Compose حتى مع إيقاف الميزة) | — |
 | `VITE_ONLYOFFICE_ENABLED` | إظهار أزرار المحرر في الواجهة (يُبنى داخل صورة `web`) | `false` |
 | `SUBMISSION_SNAPSHOT_ENABLED` | توليد لقطة PDF لطلبات النماذج | `true` |
-| `LICENSE_FILE` | مسار ملف الترخيص داخل الحاوية | `./license.json` |
-| `LICENSE_SIGNING_KEY` | مفتاح HMAC لتوقيع/تحقق `license.json` (لا يُعرض ولا يُسجَّل) | `""` |
-| `LICENSE_HARDWARE_ID` | تثبيت بصمة العتاد للتجارب/الحاويات (64 hex) | `""` |
+| `LICENSE_FILE` | مسار الملف محليًا؛ Compose يثبّته داخل الحاوية على `/app/license.json` | `./license.json` |
+| `LICENSE_SIGNING_KEY` | مفتاح HMAC لتوقيع/تحقق `license.json`؛ وَلّده بـ `openssl rand -hex 32` (لا يُعرض ولا يُسجَّل) | `""` |
+| `LICENSE_HARDWARE_ID` | بصمة العتاد (64 hex) من `python -m app.cli.license hardware-id` | `""` |
 | `LICENSE_KEY` | توافق قديم: يُستخدم فقط إذا لم يوجد `license.json` | — |
 | `LICENSE_EXPIRES_ON` | توافق قديم: تاريخ ISO عند استخدام `LICENSE_KEY` | `2027-12-31` |
 | `LICENSE_ENFORCE` | منع إقلاع API عند `expired`/`invalid`/`hardware_mismatch` | `false` |
 
-> لا تُرفع ملفات `.env` إلى Git أبدًا.
+> لا تُرفع ملفات `.env` إلى Git أبدًا. كذلك `license.json` و`LICENSE_SIGNING_KEY`
+> مستبعدان صراحةً عبر `.gitignore`.
 
 ---
 
@@ -373,56 +374,74 @@ python -m pytest -o addopts= -q --tb=short   # 216/216 (SQLite in-memory)
 - حقل `features` داخل الملف مقبول ومحفوظ، لكنه **لا يُفعّل gating لميزات بعينها حاليًا**؛ الترخيص يفتح النظام ككل.
 - إن لم يوجد `license.json`، يبقى التوافق القديم مع `LICENSE_KEY` / `LICENSE_EXPIRES_ON` يعمل (`source="env"`).
 
-### تفعيل الترخيص كمطوّر على جهاز به Docker
+### تفعيل الترخيص على جهاز به Docker (المرحلة C)
+
+> `docker-compose.yml` يثبّت ملف `./license.json` الموجود على المضيف كـ **volume للقراءة فقط**
+> في خدمتَي `api` و`worker` على المسار `/app/license.json`، ويضبط `LICENSE_FILE=/app/license.json`
+> صراحةً. لذلك يبقى الترخيص ساريًا بعد `docker compose down && docker compose up -d --build`
+> دون نسخ الملف يدويًا. أنشئ الملف على المضيف قبل أول تشغيل، ولا ترفعه إلى Git.
+
+أوامر CLI (من مجلد `apps/api`، أو داخل الحاوية ببادئة `docker compose exec api ...`):
+
+| الأمر | الغرض |
+|---|---|
+| `python -m app.cli.license hardware-id` | طباعة بصمة العتاد (64 hex) للخادم الحالي. |
+| `python -m app.cli.license generate --client "اسم العميل" --self --expires YYYY-MM-DD --out license.json` | إنشاء ملف ترخيص موقّع؛ `--self` يستخدم `LICENSE_HARDWARE_ID` من `.env`. |
+| `python -m app.cli.license verify --file license.json` | التحقق من التوقيع وتاريخ الانتهاء والبصمة وعرض الحالة. |
 
 1. في `.env` اضبط على الأقل `POSTGRES_PASSWORD` و`SECRET_KEY` و`ONLYOFFICE_JWT_SECRET`،
-   واترك `LICENSE_ENFORCE=false` و`LICENSE_HARDWARE_ID=""` أثناء التجربة، ثم شغّل:
+   واترك `LICENSE_ENFORCE=false` و`LICENSE_HARDWARE_ID=""` للتشغيل الأول، ثم:
 
    ```bash
    docker compose up -d --build
    ```
 
-2. اقرأ بصمة جهاز الاختبار:
+2. اقرأ بصمة الخادم وثبّتها في `.env`:
 
    ```bash
    docker compose exec api python -m app.cli.license hardware-id
    ```
 
-3. أنشئ الملف من مجلد `apps/api` على جهاز المطوّر (أو داخل الحاوية):
+   ```env
+   LICENSE_HARDWARE_ID=<الhex-الناتج-من-الخطوة-2>
+   ```
+
+3. أنشئ الملف على المضيف من مجلد `apps/api`:
 
    ```bash
+   # للإنتاج فقط: openssl rand -hex 32   ثم ضع الناتج في LICENSE_SIGNING_KEY
    python -m app.cli.license generate \
      --client "شركة السويس لمشتقات الميثانول" \
-     --hardware-id <الhex-من-الخطوة-2> \
+     --self \
      --issued 2026-11-23 \
      --expires 2027-11-23 \
-     --out license.json
+     --out ../../license.json
    ```
 
-   للإنتاج أضف `--signing-key "<مفتاحك>"` أو مرّره عبر `LICENSE_SIGNING_KEY`.
-   **لا ترفع المفتاح ولا الملف إلى Git.**
+   `--self` يقرأ `LICENSE_HARDWARE_ID` من `.env`، ويمكن تمرير `--hardware-id <hex>` بدلًا منه.
+   للإنتاج مرّر `--signing-key "<مفتاحك>"` أو اتركه في `LICENSE_SIGNING_KEY`.
+   **لا ترفع المفتاح ولا الملف إلى Git** (كلاهما في `.gitignore`).
 
-4. انسخ الملف إلى الحاوية للتحقق المؤقت:
+4. تحقّق من الملف المُركَّب داخل الحاوية ومن حالة API:
 
    ```bash
-   docker compose cp ./license.json api:/app/license.json
-   docker compose cp ./license.json worker:/app/license.json
    docker compose exec api python -m app.cli.license verify --file /app/license.json
+   docker compose exec api python -m app.cli.license hardware-id
    ```
 
-   > `docker-compose.yml` لا يحتوي بعد على mount ثابت للترخيص؛ الملف المنسوخ بهذه الطريقة
-   > يضيع عند إعادة إنشاء الحاوية. إضافة الـ volume وتثبيت `LICENSE_HARDWARE_ID`
-   > مدرجة في `tasks.md` (المرحلة C).
+   ثم سجّل الدخول كـ `ADMIN`/`HR` وافحص `GET /api/license/status`؛ يجب أن تظهر `active`.
 
-5. سجّل الدخول كـ `ADMIN`/`HR` وتحقق من `GET /api/license/status` أو بطاقة لوحة التحكم.
-   بعد ظهور `active` يمكن ضبط:
+5. بعد التأكد يمكن تفعيل الفرض:
 
    ```env
    LICENSE_ENFORCE=true
-   LICENSE_HARDWARE_ID=<نفس-الhex-الموثق>
    ```
 
-   ثم `docker compose up -d --force-recreate api`.
+   ثم `docker compose up -d --force-recreate api worker`.
+   مع `LICENSE_ENFORCE=false` يقلع النظام طبيعيًا ويسجّل تحذيرًا عربيًا عند `expired`
+   أو `invalid` أو `hardware_mismatch`. ومع `true` يفشل إقلاع `api` برسالة عربية واضحة
+   في هذه الحالات الثلاث فقط؛ `expiring` و`not_yet_valid` لا تمنعان الإقلاع.
+   لا تتضمن الرسائل أو السجلات أي مفتاح توقيع أو محتوى الملف.
 
 © 2026 Suez Methanol Derivatives Co. (SMD). جميع الحقوق محفوظة.
 الاستخدام داخلي ومخصص للشركة.
